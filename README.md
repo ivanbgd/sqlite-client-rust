@@ -57,13 +57,13 @@ $ sqlite3 sample.db "select id, name from apples"
 There are two other databases that you can use:
 
 1. `superheroes.db`:
-   - This is a small version of the test database used in the table-scan stage.
-   - It contains one table: `superheroes`.
-   - It is ~1MB in size.
+    - This is a small version of the test database used in the table-scan stage.
+    - It contains one table: `superheroes`.
+    - It is ~1MB in size.
 2. `companies.db`:
-   - This is a small version of the test database used in the index-scan stage.
-   - It contains one table: `companies`, and one index: `idx_companies_country`
-   - It is ~7MB in size.
+    - This is a small version of the test database used in the index-scan stage.
+    - It contains one table: `companies`, and one index: `idx_companies_country`
+    - It is ~7MB in size.
 
 These aren't included in the repository because they're large in size. You can
 download them by running this script:
@@ -75,3 +75,12 @@ download them by running this script:
 If the script doesn't work for some reason, you can download the databases
 directly from
 [codecrafters-io/sample-sqlite-databases](https://github.com/codecrafters-io/sample-sqlite-databases).
+
+# Running the Program
+
+- To emulate `$ sqlite3 sample.db .dbinfo`:
+
+```
+$ ./your_program.sh sample.db .dbinfo
+database page size: 4096
+```
