@@ -83,4 +83,6 @@ directly from
 ```
 $ ./your_program.sh sample.db .dbinfo
 database page size: 4096
+number of pages: 1910
+number of tables: 3
 ```
