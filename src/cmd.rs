@@ -86,9 +86,9 @@ fn num_tables(db_file_path: &str) -> Result<u32, CmdError> {
     db_file.read_exact(&mut page_num_cells)?;
     let page_num_cells = u16::from_be_bytes(page_num_cells) as u32;
 
-    // eprintln!("page_header_len = {page_header_len}");
-    // eprintln!("page_num_cells = {page_num_cells}");
-    // eprintln!("page_type = {page_type:?}");
+    // eprintln!("page_header_len = {page_header_len}"); // todo rem
+    // eprintln!("page_num_cells = {page_num_cells}"); // todo rem
+    // eprintln!("page_type = {page_type:?}"); // todo rem
     if page_type == PageType::LeafTable {
         total_num_cells += page_num_cells;
         return Ok(total_num_cells);
@@ -98,7 +98,7 @@ fn num_tables(db_file_path: &str) -> Result<u32, CmdError> {
     _pos = db_file.seek(SeekFrom::Current(page_header_len - 5))?;
     let mut cell_pointer_array: Vec<u16> = Vec::with_capacity(page_num_cells as usize);
     for _ in 0..page_num_cells {
-        let mut cell_ptr = [0u8; 2];
+        let mut cell_ptr = [0u8; 2]; // The offsets are relative to the start of the page.
         db_file.read_exact(&mut cell_ptr)?;
         cell_pointer_array.push(u16::from_be_bytes(cell_ptr));
     }
@@ -108,20 +108,23 @@ fn num_tables(db_file_path: &str) -> Result<u32, CmdError> {
     cell_pointer_array.reverse();
 
     let page_size = page_size(db_file_path)?;
-    // eprintln!("page_size = {page_size:?}");
+    // eprintln!("page_size = {page_size:?}"); // todo rem
+
+    let page_num = 1;
+    let page_start = (page_num - 1) * page_size as u32;
 
     // Visit each cell.
     for cell_ptr in cell_pointer_array {
-        _pos = db_file.seek(SeekFrom::Start(cell_ptr as u64))?;
+        _pos = db_file.seek(SeekFrom::Start((page_start + cell_ptr as u32) as u64))?;
         // The format of a cell (B-tree Cell Format) depends on which kind of
         // b-tree page the cell appears on (the current page).
         match page_type {
             PageType::InteriorTable => {
                 // Page number of left child
-                let mut left = [0u8; 4];
-                db_file.read_exact(&mut left)?;
-                let left = u32::from_be_bytes(left);
-                let offset = (left * page_size as u32) as u64;
+                let mut left_page_num = [0u8; 4];
+                db_file.read_exact(&mut left_page_num)?;
+                let left_page_num = u32::from_be_bytes(left_page_num);
+                let offset = ((left_page_num - 1) * page_size as u32) as u64;
                 _pos = db_file.seek(SeekFrom::Start(offset))?;
                 // Determine the page type. It's the first byte of the page header.
                 let mut page_type = [0u8; 1];
