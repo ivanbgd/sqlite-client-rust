@@ -80,9 +80,16 @@ directly from
 
 - To emulate `$ sqlite3 sample.db .dbinfo`:
 
-```
+```shell
 $ ./your_program.sh sample.db .dbinfo
 database page size: 4096
-number of pages: 1910
+number of pages: 4
 number of tables: 3
+```
+
+- To emulate `$ sqlite3 sample.db .tables`:
+
+```shell
+$ ./your_sqlite3.sh sample.db .tables
+apples oranges
 ```

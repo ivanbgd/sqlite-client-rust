@@ -2,6 +2,7 @@
 //!
 //! Error types and helper functions used in the library
 
+use crate::constants::VarintType;
 use crate::page::PageType;
 use thiserror::Error;
 
@@ -15,7 +16,7 @@ pub enum ApplicationError {
     Other(#[from] anyhow::Error),
 }
 
-/// Errors related to working with [`crate::cmd`]
+/// Errors related to working with [`crate::dot_cmd`]
 #[derive(Debug, Error)]
 pub enum CmdError {
     #[error("I/O error: {0}")]
@@ -23,6 +24,19 @@ pub enum CmdError {
 
     #[error("Unsupported PageType: {0:?}")]
     UnsupportedPageType(PageType),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+/// Errors related to working with [`crate::varint`]
+#[derive(Debug, Error)]
+pub enum VarintError {
+    #[error("Reserved VarintType: {0}")]
+    Reserved(VarintType),
+
+    #[error("Unsupported VarintType: {0}")]
+    Unsupported(VarintType),
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),

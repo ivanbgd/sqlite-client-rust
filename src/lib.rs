@@ -1,6 +1,7 @@
 //! # SQLite Library
 
-pub mod cmd;
 pub mod constants;
+pub mod dot_cmd;
 pub mod errors;
 pub mod page;
+pub mod varint;
