@@ -78,6 +78,12 @@ directly from
 
 # Running the Program
 
+The program works from the command line, and supports the so-called dot-commands (CLI commands) as well as
+SQL commands.  
+Supported commands can be supplied in lower, upper or mixed-case, i.e., they are case-insensitive.
+
+## CLI Commands (dot-commands)
+
 - To emulate `$ sqlite3 sample.db .dbinfo`:
 
 ```shell
@@ -90,6 +96,13 @@ number of tables: 3
 - To emulate `$ sqlite3 sample.db .tables`:
 
 ```shell
-$ ./your_sqlite3.sh sample.db .tables
+$ ./your_program.sh sample.db .tables
 apples oranges
+```
+
+## SQL Commands
+
+```shell
+$ ./your_program.sh sample.db "SELECT COUNT(*) FROM apples"
+4
 ```

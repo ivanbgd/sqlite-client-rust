@@ -45,10 +45,10 @@ pub fn read_varint(db_file: &mut File) -> Result<(VarintType, u64)> {
     Ok((decode_varint(&varint), i as u64))
 }
 
-/// Decodes record format serial type.
+/// Returns content size of a record format serial type.
 ///
 /// See [2.1. Record Format](https://www.sqlite.org/fileformat.html#record_format).
-pub fn decode_serial_type(n: VarintType) -> Result<VarintType, VarintError> {
+pub fn serial_type_to_content_size(n: VarintType) -> Result<VarintType, VarintError> {
     let res = match n {
         0..=4 => n,
         5 => 6,

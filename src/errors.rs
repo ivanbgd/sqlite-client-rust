@@ -10,7 +10,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum ApplicationError {
     #[error(transparent)]
-    CmdError(#[from] CmdError),
+    CmdError(#[from] DotCmdError),
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),
@@ -18,12 +18,34 @@ pub enum ApplicationError {
 
 /// Errors related to working with [`crate::dot_cmd`]
 #[derive(Debug, Error)]
-pub enum CmdError {
+pub enum DotCmdError {
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
     #[error("Unsupported PageType: {0:?}")]
     UnsupportedPageType(PageType),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+/// Errors related to working with [`crate::sql`]
+#[derive(Debug, Error)]
+pub enum SqlError {
+    #[error("I/O error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("Unsupported PageType: {0:?}")]
+    UnsupportedPageType(PageType),
+
+    #[error("SELECT missing arguments")]
+    SelectIncomplete,
+
+    #[error("SELECT unsupported variant: '{0}'")]
+    SelectUnsupported(String),
+
+    #[error("Missing table: '{0}'")]
+    MissingTable(String),
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),
