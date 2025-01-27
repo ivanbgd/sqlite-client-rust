@@ -101,7 +101,7 @@ apples oranges
 ```
 
 ## SQL Commands
-
+ 
 ```shell
 $ ./your_program.sh sample.db "SELECT COUNT(*) FROM apples"
 4
