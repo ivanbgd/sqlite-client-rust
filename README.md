@@ -79,8 +79,12 @@ directly from
 # Running the Program
 
 The program works from the command line, and supports the so-called dot-commands (CLI commands) as well as
-SQL commands.  
-Supported commands can be supplied in lower, upper or mixed-case, i.e., they are case-insensitive.
+SQL commands.
+
+Supported SQL commands can be supplied in lower, upper or mixed-case, i.e., they are case-insensitive.  
+The same is true of the supplied table names.
+
+Supported dot-commands are also case-insensitive.
 
 ## CLI Commands (dot-commands)
 
@@ -101,7 +105,7 @@ apples oranges
 ```
 
 ## SQL Commands
- 
+
 ```shell
 $ ./your_program.sh sample.db "SELECT COUNT(*) FROM apples"
 4

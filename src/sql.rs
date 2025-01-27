@@ -33,7 +33,7 @@ pub fn select(db_file_path: &str, command: &str) -> Result<String> {
             let page_size = dot_cmd::page_size(db_file_path)?;
             let tables_meta = get_tables_meta(db_file_path)?;
             for table in tables_meta.0 {
-                if table.tbl_name == *arg {
+                if table.tbl_name.eq_ignore_ascii_case(arg) {
                     // We've found the requested table, `arg`.
                     // Now we need to jump to its page and read the number of cells on the page from the page header.
                     let rootpage = table.rootpage;
