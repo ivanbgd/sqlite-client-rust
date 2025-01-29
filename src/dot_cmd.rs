@@ -7,7 +7,7 @@
 use crate::constants::HEADER;
 use crate::errors::DotCmdError;
 use crate::tables;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use std::fs::File;
 use std::io::prelude::*;
 
@@ -19,6 +19,7 @@ pub fn dot_dbinfo(db_file_path: &str) -> Result<()> {
         "number of tables: {}",
         tables::get_tables_meta(db_file_path)?.0.len()
     );
+    eprintln!("text encoding: {}", text_encoding(db_file_path)?);
 
     Ok(())
 }
@@ -34,6 +35,7 @@ pub fn dot_tables(db_file_path: &str) -> Result<Vec<String>, DotCmdError> {
             table_names.push(tbl_name);
         }
     }
+    table_names.sort();
 
     Ok(table_names)
 }
@@ -71,5 +73,24 @@ fn num_pages(db_file_path: &str) -> Result<u32> {
         let file_len = db_file.metadata()?.len();
         let page_size = u16::from_be_bytes([header[16], header[17]]) as u64;
         Ok((file_len / page_size) as u32)
+    }
+}
+
+/// Returns the text encoding of a SQLite database.
+///
+/// https://www.sqlite.org/fileformat2.html#enc
+///
+/// The text encoding is stored at the 56th byte offset in database header, using 4 bytes in big-endian order.
+pub(crate) fn text_encoding(db_file_path: &str) -> Result<String> {
+    let mut db_file = File::open(db_file_path)?;
+    let mut header = HEADER;
+    db_file.read_exact(&mut header)?;
+
+    let enc = u32::from_be_bytes([header[56], header[57], header[58], header[59]]);
+    match enc {
+        1 => Ok("utf-8".to_string()),
+        2 => Ok("utf-16le".to_string()),
+        3 => Ok("utf-16be".to_string()),
+        v => bail!("The value {v} for text encoding is not allowed!"),
     }
 }

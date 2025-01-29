@@ -44,8 +44,11 @@ pub enum SqlError {
     #[error("SELECT unsupported variant: '{0}'")]
     SelectUnsupported(String),
 
-    #[error("Missing table: '{0}'")]
-    MissingTable(String),
+    #[error("No such table: '{0}'")]
+    NoSuchTable(String),
+
+    #[error("No such column: '{0}'")]
+    NoSuchColumn(String),
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),

@@ -6,6 +6,7 @@ use crate::errors::DotCmdError;
 use crate::page::PageType;
 use crate::varint::{read_varint, serial_type_to_content_size};
 use anyhow::Result;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
@@ -14,13 +15,13 @@ use std::io::{Read, Seek, SeekFrom};
 /// The metadata are extracted from the schema table.
 ///
 /// This is a tuple-struct that contains a vector of metadata for each table in DB.
-pub(crate) struct TablesMeta(pub(crate) Vec<SchemaTable>);
+pub(crate) struct TablesMeta(pub(crate) HashMap<String, SchemaTable>);
 
 impl TablesMeta {
     pub(crate) fn get_tbl_names(self) -> Vec<String> {
         let mut tbl_names = Vec::with_capacity(self.0.len());
-        for table in self.0 {
-            tbl_names.push(table.tbl_name);
+        for (tbl_name, _table) in self.0 {
+            tbl_names.push(tbl_name);
         }
         tbl_names
     }
@@ -33,15 +34,23 @@ pub(crate) struct SchemaTable {
     pub(crate) name: String,
     pub(crate) tbl_name: String,
     pub(crate) rootpage: u64,
+    pub(crate) sql: String,
 }
 
 impl SchemaTable {
-    pub(crate) fn new(tbl_type: String, name: String, tbl_name: String, rootpage: u64) -> Self {
+    pub(crate) fn new(
+        tbl_type: String,
+        name: String,
+        tbl_name: String,
+        rootpage: u64,
+        sql: String,
+    ) -> Self {
         Self {
             tbl_type,
             name,
             tbl_name,
             rootpage,
+            sql,
         }
     }
 }
@@ -56,7 +65,7 @@ pub(crate) fn get_tables_meta(db_file_path: &str) -> Result<TablesMeta, DotCmdEr
     let mut db_file = File::open(db_file_path)?;
     let mut _pos = db_file.seek(SeekFrom::Start(HEADER.len() as u64))?;
 
-    let mut tables_meta = TablesMeta(Vec::new());
+    let mut tables_meta = TablesMeta(HashMap::new());
 
     let page_size = dot_cmd::page_size(db_file_path)?;
     let mut page_num = 1;
@@ -144,7 +153,7 @@ pub(crate) fn get_tables_meta(db_file_path: &str) -> Result<TablesMeta, DotCmdEr
     Ok(tables_meta)
 }
 
-/// Reads a table type, name and rootpage, and adds them to `tables_meta`.
+/// Reads a table type, name, rootpage and sql, and adds them to `tables_meta`.
 ///
 /// Works on an individual table.
 ///
@@ -191,38 +200,46 @@ fn parse_schema_table(db_file: &mut File, tables_meta: &mut TablesMeta) -> anyho
     // For example, if 1, content size is 1 and the value is an 8-bit twos-complement integer.
     let schema_rootpage = serial_type_to_content_size(read_varint(db_file)?.0)? as u64;
     // Serial type for sqlite_schema.sql (varint) -> Size of sqlite_schema.sql:
-    let _schema_sql = serial_type_to_content_size(read_varint(db_file)?.0)? as u64;
+    let schema_sql = serial_type_to_content_size(read_varint(db_file)?.0)? as u64;
 
     // Record body
 
-    let record_body_start = db_file.stream_position()?;
+    let mut offset = db_file.stream_position()?; // Record body start, i.e., current position.
     let mut buf = [0u8; SCHEMA_TABLE_FIELD_LEN];
 
     // Schema table type
+    let _pos = db_file.seek(SeekFrom::Start(offset))?; // Not needed, but kept for consistency.
     db_file.read_exact(&mut buf)?;
-    let tbl_type = String::from_utf8(Vec::from(&buf[0..schema_type as usize]))?;
+    let tbl_type = String::from_utf8(Vec::from(&buf[0..schema_type as usize]))?.to_lowercase();
 
     // Schema name
-    let _pos = db_file.seek(SeekFrom::Start(record_body_start + schema_type))?;
+    offset += schema_type;
+    let _pos = db_file.seek(SeekFrom::Start(offset))?;
     db_file.read_exact(&mut buf)?;
-    let name = String::from_utf8(Vec::from(&buf[0..schema_name as usize]))?;
+    let name = String::from_utf8(Vec::from(&buf[0..schema_name as usize]))?.to_lowercase();
 
     // Schema table name
-    let _pos = db_file.seek(SeekFrom::Start(
-        record_body_start + schema_type + schema_name,
-    ))?;
+    offset += schema_name;
+    let _pos = db_file.seek(SeekFrom::Start(offset))?;
     db_file.read_exact(&mut buf)?;
-    let tbl_name = String::from_utf8(Vec::from(&buf[0..schema_tbl_name as usize]))?;
+    let tbl_name = String::from_utf8(Vec::from(&buf[0..schema_tbl_name as usize]))?.to_lowercase();
 
     // Schema rootpage
-    let _pos = db_file.seek(SeekFrom::Start(
-        record_body_start + schema_type + schema_name + schema_tbl_name,
-    ))?;
+    offset += schema_tbl_name;
+    let _pos = db_file.seek(SeekFrom::Start(offset))?;
     let rootpage = decode_serial_type_integer(db_file, schema_rootpage)?.0 as u64;
 
-    tables_meta
-        .0
-        .push(SchemaTable::new(tbl_type, name, tbl_name, rootpage));
+    // Schema sql
+    offset += schema_rootpage;
+    let _pos = db_file.seek(SeekFrom::Start(offset))?;
+    db_file.read_exact(&mut buf)?;
+    let sql = String::from_utf8(Vec::from(&buf[0..schema_sql as usize]))?.to_lowercase();
+
+    // Add schema for this table to the list.
+    tables_meta.0.insert(
+        tbl_name.clone(),
+        SchemaTable::new(tbl_type, name, tbl_name, rootpage, sql),
+    );
 
     Ok(())
 }

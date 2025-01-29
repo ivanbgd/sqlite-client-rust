@@ -95,6 +95,7 @@ $ ./your_program.sh sample.db .dbinfo
 database page size: 4096
 number of pages: 4
 number of tables: 3
+text encoding: utf-8
 ```
 
 - To emulate `$ sqlite3 sample.db .tables`:
@@ -109,4 +110,12 @@ apples oranges
 ```shell
 $ ./your_program.sh sample.db "SELECT COUNT(*) FROM apples"
 4
+```
+
+```shell
+$ ./your_program.sh sample.db "SELECT name FROM apples"
+Granny Smith
+Fuji
+Honeycrisp
+Golden Delicious
 ```

@@ -28,7 +28,7 @@ use std::io::Read;
 /// # Returns
 ///
 /// Returns a 2-tuple of (the decoded *varint* value, the number of bytes read).
-pub fn read_varint(db_file: &mut File) -> Result<(VarintType, u64)> {
+pub(crate) fn read_varint(db_file: &mut File) -> Result<(VarintType, u64)> {
     let mut varint = [0u8; MAX_VARINT_LEN];
 
     let mut i = 0;
@@ -48,7 +48,7 @@ pub fn read_varint(db_file: &mut File) -> Result<(VarintType, u64)> {
 /// Returns content size of a record format serial type.
 ///
 /// See [2.1. Record Format](https://www.sqlite.org/fileformat.html#record_format).
-pub fn serial_type_to_content_size(n: VarintType) -> Result<VarintType, VarintError> {
+pub(crate) fn serial_type_to_content_size(n: VarintType) -> Result<VarintType, VarintError> {
     let res = match n {
         0..=4 => n,
         5 => 6,

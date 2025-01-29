@@ -15,14 +15,17 @@ fn main() -> Result<()> {
     let db_file_path = &args[1];
 
     // Parse command and act accordingly
-    let command = &args[2];
+    let command = &args[2].trim().to_lowercase();
 
     // SQL commands
-    if command.to_lowercase().starts_with("select") {
-        println!("{}", select(db_file_path, command)?);
+    if command.starts_with("select") {
+        let result = select(db_file_path, command)?;
+        for item in result {
+            println!("{}", item);
+        }
     } else {
         // CLI (dot) commands
-        match command.to_lowercase().as_str() {
+        match command.as_str() {
             ".dbinfo" => {
                 dot_dbinfo(db_file_path)?;
             }
