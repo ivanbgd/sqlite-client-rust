@@ -4,7 +4,8 @@ use crate::constants::{HEADER, SCHEMA_TABLE_FIELD_LEN};
 use crate::dot_cmd;
 use crate::errors::DotCmdError;
 use crate::page::PageType;
-use crate::varint::{read_varint, serial_type_to_content_size};
+use crate::serial_type::{decode_serial_type_integer, serial_type_to_content_size};
+use crate::varint::read_varint;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::fs::File;
@@ -60,7 +61,7 @@ impl SchemaTable {
 /// Currently, we only support one level of `PageType::InteriorTable`.
 ///
 /// This function moves the file pointer internally, but it always starts at the beginning of the database file.
-// TODO: Perhaps traverse the entire B-Tree properly. Keep in mind that page 1 is different than other pages.
+// TODO: Perhaps traverse the entire B-Tree properly. Remember that page 1 is different than other pages.
 pub(crate) fn get_tables_meta(db_file_path: &str) -> Result<TablesMeta, DotCmdError> {
     let mut db_file = File::open(db_file_path)?;
     let mut _pos = db_file.seek(SeekFrom::Start(HEADER.len() as u64))?;
@@ -208,7 +209,7 @@ fn parse_schema_table(db_file: &mut File, tables_meta: &mut TablesMeta) -> anyho
     let mut buf = [0u8; SCHEMA_TABLE_FIELD_LEN];
 
     // Schema table type
-    let _pos = db_file.seek(SeekFrom::Start(offset))?; // Not needed, but kept for consistency.
+    let _pos = db_file.seek(SeekFrom::Start(offset))?; // Not needed in this place, but kept for consistency.
     db_file.read_exact(&mut buf)?;
     let tbl_type = String::from_utf8(Vec::from(&buf[0..schema_type as usize]))?.to_lowercase();
 
@@ -242,89 +243,4 @@ fn parse_schema_table(db_file: &mut File, tables_meta: &mut TablesMeta) -> anyho
     );
 
     Ok(())
-}
-
-/// Takes a file handle and a supported integer length, and reads an integer of the given length from the
-/// current position in the file and returns it.
-///
-/// Supported input values are `1..=6` for the length of the integer, `int_len`.
-///
-/// The returned value is a twos-complement integer.
-///
-/// Moves the pointer in the file handle by the number of bytes read, but also returns that number.
-///
-/// See [The Record Format](https://www.sqlite.org/fileformat.html#record_format).
-///
-/// # Returns
-///
-/// Returns a 2-tuple of (the decoded integer value, the number of bytes read).
-fn decode_serial_type_integer(db_file: &mut File, mut int_len: u64) -> Result<(i64, u64)> {
-    assert!((1..=6).contains(&int_len));
-    if int_len == 5 {
-        int_len = 6;
-    } else if int_len == 6 {
-        int_len = 8;
-    }
-
-    let mut buf = [0u8; 8];
-    for i in 0..int_len as usize {
-        let mut byte = [0u8; 1];
-        db_file.read_exact(&mut byte)?;
-        buf[8 - int_len as usize + i] = byte[0];
-    }
-    let integer = i64::from_be_bytes(buf);
-
-    Ok((integer, int_len))
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::tables::decode_serial_type_integer;
-    use std::fs::File;
-    use std::io::{Seek, SeekFrom};
-
-    /// Really meant as a serial type integer in the DB file; a single byte, though.
-    /// This is the "apples" table's rootpage number, stored at offset 0xfa9 from the beginning of the DB file.
-    #[test]
-    fn decode_apples_rootpage() {
-        let expected: i64 = 0x2; // dec 2
-        let mut db_file = File::open("sample.db").unwrap();
-        let _pos = db_file.seek(SeekFrom::Start(0x0fa9)).unwrap(); // byte 0x02
-        let int_len = 1;
-        let result = decode_serial_type_integer(&mut db_file, int_len).unwrap();
-        assert_eq!(expected, result.0);
-        assert_eq!(1, result.1);
-    }
-
-    /// Not meant as a serial type integer in the DB file, but it serves the purpose of testing the function;
-    /// three bytes at offset 0x3f74.
-    #[test]
-    fn decode_three_byte_integer() {
-        let expected: i64 = 0x6d656e; // dec 7169390
-        let mut db_file = File::open("sample.db").unwrap();
-        let _pos = db_file.seek(SeekFrom::Start(0x3f74)).unwrap(); // bytes 0x6d 0x65 0x6e
-        let int_len = 3;
-        let result = decode_serial_type_integer(&mut db_file, int_len).unwrap();
-        assert_eq!(expected, result.0);
-        assert_eq!(3, result.1);
-    }
-
-    /// Not meant as a serial type integer in the DB file, but it serves the purpose of testing the function;
-    /// eight bytes at offset 0x3fa4.
-    ///
-    /// This number's MSByte has MSBit == 0, and this is a 64-bit signed integer number, so we're close to the
-    /// limit, as we can't have the MSBit == 1, so this is a good test in that regard.
-    ///
-    /// Another thing which makes this test comprehensive is that we are converting serial type 6
-    /// to content size 8.
-    #[test]
-    fn decode_eight_byte_integer() {
-        let expected: i64 = 0x3b_54_61_6e_67_65_72_69; // dec 4275149073090441833
-        let mut db_file = File::open("sample.db").unwrap();
-        let _pos = db_file.seek(SeekFrom::Start(0x3fa4)).unwrap(); // hex bytes: 3b 54 61 6e  67 65 72 69
-        let int_len = 6;
-        let result = decode_serial_type_integer(&mut db_file, int_len).unwrap();
-        assert_eq!(expected, result.0);
-        assert_eq!(8, result.1);
-    }
 }

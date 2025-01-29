@@ -107,10 +107,14 @@ apples oranges
 
 ## SQL Commands
 
+### Count number of rows in a table
+
 ```shell
 $ ./your_program.sh sample.db "SELECT COUNT(*) FROM apples"
 4
 ```
+
+### Select from a single column
 
 ```shell
 $ ./your_program.sh sample.db "SELECT name FROM apples"

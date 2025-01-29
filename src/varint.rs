@@ -1,4 +1,4 @@
-//! Varint-related functions
+//! Varint-related Functions
 //!
 //! A variable-length integer or "varint" is a static Huffman encoding of 64-bit twos-complement integers that uses
 //! less space for small positive values. A varint is between 1 and 9 bytes in length.
@@ -12,7 +12,6 @@
 //! 64-bit signed integers defined above.
 
 use crate::constants::{VarintType, MAX_VARINT_LEN, VARINT_MASK};
-use crate::errors::VarintError;
 use anyhow::Result;
 use std::fs::File;
 use std::io::Read;
@@ -43,29 +42,6 @@ pub(crate) fn read_varint(db_file: &mut File) -> Result<(VarintType, u64)> {
     }
 
     Ok((decode_varint(&varint), i as u64))
-}
-
-/// Returns content size of a record format serial type.
-///
-/// See [2.1. Record Format](https://www.sqlite.org/fileformat.html#record_format).
-pub(crate) fn serial_type_to_content_size(n: VarintType) -> Result<VarintType, VarintError> {
-    let res = match n {
-        0..=4 => n,
-        5 => 6,
-        6 | 7 => 8,
-        8 | 9 => 0,
-        10 | 11 => return Err(VarintError::Reserved(n)),
-        12..=VarintType::MAX => {
-            if n % 2 == 0 {
-                (n - 12) / 2
-            } else {
-                (n - 13) / 2
-            }
-        }
-        _ => return Err(VarintError::Unsupported(n)),
-    };
-
-    Ok(res)
 }
 
 /// Decodes a single *varint*.

@@ -4,8 +4,11 @@
 
 use crate::dot_cmd;
 use crate::errors::SqlError;
+use crate::serial_type::{
+    read_serial_type_to_content, serial_type_to_content_size, SerialTypeValue,
+};
 use crate::tables::get_tables_meta;
-use crate::varint::{read_varint, serial_type_to_content_size};
+use crate::varint::read_varint;
 use anyhow::Result;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -121,7 +124,7 @@ fn select_column_from_table(
         // Pages are numbered from one, i.e., they are 1-indexed, so subtract one to get to the page.
         let page_size = dot_cmd::page_size(db_file_path)?;
         let page_offset = (rootpage - 1) * page_size as u64;
-        let mut db_file = File::open(db_file_path)?;
+        let db_file = &mut File::open(db_file_path)?;
 
         // The order of the column can be retrieved from the "sqlite_schema" table's "sql" column.
         // That's where we could obtain the column type from, too.
@@ -165,7 +168,9 @@ fn select_column_from_table(
                         Some(sql) => sql,
                         None => sql
                             .strip_prefix(format!("create table \"{}\" (", table_name).as_str())
-                            .expect("strip prefix: create table \"<table>\""),
+                            .unwrap_or_else(|| {
+                                panic!("strip prefix: create table \"{}\" (", table_name)
+                            }),
                     };
                     let columns = sql.split(',').collect::<Vec<_>>();
                     for col in &columns {
@@ -203,57 +208,52 @@ fn select_column_from_table(
             row_offsets.push(u16::from_be_bytes(buf));
             offset += 2;
         }
-        // We don't have to loop twice, but we'll do it for clarity. This is not meant for production.
+        // We don't have to loop twice, but we'll do it for clarity. This code is not meant for production.
         // Loop over rows.
         for row_offset in row_offsets {
             let offset = page_offset + row_offset as u64;
             let _pos = db_file.seek(SeekFrom::Start(offset))?;
             // B-tree Cell Format
-            let (_payload_size, _read) = read_varint(&mut db_file)?;
-            let (_row_id, _read) = read_varint(&mut db_file)?;
+            let (_payload_size, _read) = read_varint(db_file)?;
+            let (_row_id, _read) = read_varint(db_file)?;
             // Now comes payload, as a byte array, or actual rows (records).
             // Payload, either table b-tree data or index b-tree keys, is always in the "record format".
             // The record format defines a sequence of values corresponding to columns in a table or index.
-            // The record format specifies the number of columns, the datatype of each column,
-            // and the content of each column.
-            // The record format makes extensive use of the variable-length integer
-            // or varint representation of 64-bit signed integers.
+            // The record format specifies the number of columns, the datatype of each column, and the content of each column.
+            // The record format makes extensive use of the variable-length integer or varint representation of 64-bit signed integers.
             // A record contains a header and a body, in that order.
             // The header begins with a single varint which determines the total number of bytes in the header.
             // The varint value is the size of the header in bytes including the size varint itself.
             let header_start = db_file.stream_position()?; // Needed for an optimization below.
-            let (header_size, read) = read_varint(&mut db_file)?;
+            let (header_size, read) = read_varint(db_file)?;
             // Following the size varint are one or more additional varints, one per column.
             // These additional varints are called "serial type" numbers and determine the datatype of each column.
-            // The header size varint and serial type varints will usually consist of a single byte,
-            // but they could be longer, so let's determine the size in bytes.
+            // The header size varint and serial type varints will usually consist of a single byte, but they could be longer, so let's determine the size in bytes.
             let _column_data_size = header_size as u64 - read;
-            let mut is_text = false;
-            let mut column_offset = 0; // Column offset after record header.
-            let mut col_size = 0;
+            let mut column_serial_type = 0;
+            // Our column's offset after record header. Used for an optimization only.
+            let mut column_offset = 0;
             // We are looking for our column only and early-stopping when we find it.
             // We don't want to read and extract sizes of all columns.
             // That wouldn't be efficient, especially in case there's a lot of columns.
             for col_ind in 0..num_cols {
-                let (column_serial_type, _read) = read_varint(&mut db_file)?;
+                let (col_serial_type, _read) = read_varint(db_file)?;
+                column_serial_type = col_serial_type;
                 let column_content_size = serial_type_to_content_size(column_serial_type)? as u64;
                 if col_ind == column_ordinal {
-                    if (column_serial_type >= 13) && (column_serial_type % 2 == 1) {
-                        is_text = true;
-                    }
-                    col_size = column_content_size;
                     break;
                 }
                 column_offset += column_content_size;
             }
-            if !is_text {
-                todo!("column type is not text")
-            }
             let offset = header_start + header_size as u64 + column_offset;
             let _pos = db_file.seek(SeekFrom::Start(offset))?;
-            let mut buf = vec![0u8; col_size as usize];
-            db_file.read_exact(&mut buf)?;
-            let column_contents = String::from_utf8(Vec::from(&buf[0..col_size as usize]))?;
+            let column_contents = match read_serial_type_to_content(db_file, column_serial_type)? {
+                (SerialTypeValue::Text(column_contents), _read) => column_contents,
+                (SerialTypeValue::Int8(column_contents), _read) => column_contents.to_string(),
+                (stv, read) => panic!(
+                    "Got unexpected type for column '{column_name}': {stv:?}; read {read} byte(s)."
+                ),
+            };
             result.push(column_contents);
         }
 
