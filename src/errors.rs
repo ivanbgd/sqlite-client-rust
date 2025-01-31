@@ -38,17 +38,20 @@ pub enum SqlError {
     #[error("Unsupported PageType: {0:?}")]
     UnsupportedPageType(PageType),
 
-    #[error("SELECT missing arguments")]
+    #[error("SELECT incomplete")]
     SelectIncomplete,
 
     #[error("SELECT unsupported variant: '{0}'")]
     SelectUnsupported(String),
 
+    #[error("LIMIT parsing error: '{0}'")]
+    LimitParsingError(String),
+
     #[error("No such table: '{0}'")]
     NoSuchTable(String),
 
-    #[error("No such column: '{0}'")]
-    NoSuchColumn(String),
+    #[error("No such columns: '{0}'")]
+    NoSuchColumns(String),
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),

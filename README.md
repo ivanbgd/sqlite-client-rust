@@ -123,3 +123,32 @@ Fuji
 Honeycrisp
 Golden Delicious
 ```
+
+Additionally, `LIMIT` is supported.
+
+```shell
+$ ./your_program.sh sample.db "SELECT name FROM apples LIMIT 3"
+Granny Smith
+Fuji
+Honeycrisp
+```
+
+### Select from multiple columns
+
+```shell
+$ ./your_program.sh sample.db "SELECT name, color FROM apples"
+Granny Smith|Light Green
+Fuji|Red
+Honeycrisp|Blush Red
+Golden Delicious|Yellow
+```
+
+Additionally, `LIMIT` is supported.
+
+```shell
+$ ./your_program.sh sample.db "SELECT id, name, color FROM apples LIMIT 10"
+1|Granny Smith|Light Green
+2|Fuji|Red
+3|Honeycrisp|Blush Red
+4|Golden Delicious|Yellow
+```
