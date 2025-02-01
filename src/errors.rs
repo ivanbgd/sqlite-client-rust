@@ -53,6 +53,9 @@ pub enum SqlError {
     #[error("No such columns: '{0}'")]
     NoSuchColumns(String),
 
+    #[error("SELECT WHERE incomplete")]
+    WhereIncomplete,
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

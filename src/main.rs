@@ -1,6 +1,7 @@
 //! # SQLite Application
 
 use anyhow::{bail, Result};
+use codecrafters_sqlite::constants::SELECT_PATTERN;
 use codecrafters_sqlite::dot_cmd::{dot_dbinfo, dot_tables};
 use codecrafters_sqlite::sql::select;
 
@@ -15,17 +16,17 @@ fn main() -> Result<()> {
     let db_file_path = &args[1];
 
     // Parse command and act accordingly
-    let command = &args[2].trim().to_lowercase();
+    let command = args[2].trim();
 
     // SQL commands
-    if command.starts_with("select") {
+    if command.to_lowercase().starts_with(SELECT_PATTERN) {
         let result = select(db_file_path, command)?;
         for item in result {
             println!("{}", item);
         }
     } else {
         // CLI (dot) commands
-        match command.as_str() {
+        match command.to_lowercase().as_str() {
             ".dbinfo" => {
                 dot_dbinfo(db_file_path)?;
             }

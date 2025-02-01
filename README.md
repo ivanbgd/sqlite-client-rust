@@ -82,7 +82,9 @@ The program works from the command line, and supports the so-called dot-commands
 SQL commands.
 
 Supported SQL commands can be supplied in lower, upper or mixed-case, i.e., they are case-insensitive.  
-The same is true of the supplied table names.
+The same is true of the supplied table and column names.
+
+Values in the `WHERE` clause are case-sensitive.
 
 Supported dot-commands are also case-insensitive.
 
@@ -151,4 +153,18 @@ $ ./your_program.sh sample.db "SELECT id, name, color FROM apples LIMIT 10"
 2|Fuji|Red
 3|Honeycrisp|Blush Red
 4|Golden Delicious|Yellow
+```
+
+### Select Using Where
+
+```shell
+$ ./your_program.sh sample.db "SELECT id, name, color FROM apples WHERE color = 'Blush Red'"
+3|Honeycrisp|Blush Red
+```
+
+Additionally, `LIMIT` is supported.
+
+```shell
+$ ./your_program.sh sample.db "SELECT id, name, color FROM apples WHERE color = 'Blush Red' LIMIT 1"
+3|Honeycrisp|Blush Red
 ```
