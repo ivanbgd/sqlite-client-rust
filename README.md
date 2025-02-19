@@ -168,3 +168,17 @@ Additionally, `LIMIT` is supported.
 $ ./your_program.sh sample.db "SELECT id, name, color FROM apples WHERE color = 'Blush Red' LIMIT 1"
 3|Honeycrisp|Blush Red
 ```
+
+### Large Databases and Tables
+
+Large tables, spanning multiple pages, are supported.
+
+```shell
+$ ./your_program.sh superheroes.db "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes'"
+297|Stealth (New Earth)
+790|Tobias Whale (New Earth)
+1085|Felicity (New Earth)
+2729|Thrust (New Earth)
+3289|Angora Lapin (New Earth)
+3913|Matris Ater Clementia (New Earth)
+```

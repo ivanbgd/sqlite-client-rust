@@ -4,6 +4,7 @@
 
 use crate::constants::VarintType;
 use crate::errors::VarintError;
+use crate::page::Page;
 use anyhow::Error;
 use std::fs::File;
 use std::io::Read;
@@ -20,9 +21,9 @@ pub(crate) enum SerialTypeValue {
     Float64(f64),
     Zero,
     One,
-    #[allow(dead_code)]
+    #[allow(unused)]
     Reserved10,
-    #[allow(dead_code)]
+    #[allow(unused)]
     Reserved11,
     Blob(Vec<u8>),
     Text(String),
@@ -55,6 +56,88 @@ pub(crate) fn serial_type_to_content_size(
     Ok(res)
 }
 
+/// Gets a single *serial type* from a [`Page`] contents that's loaded in memory.
+///
+/// Reads from the given `offset` in the page - the `offset` is relative to the page contents start.
+///
+/// It updates `offset` so it can be reused after being updated in this function.
+/// This means that `offset` is an in-out parameter.
+///
+/// Takes a varint, `n`.
+///
+/// Returns content of a record format serial type, wrapped in [`SerialTypeValue`].
+///
+/// See [2.1. Record Format](https://www.sqlite.org/fileformat.html#record_format).
+///
+/// # Returns
+///
+/// Returns the contents of a record format serial type.
+pub(crate) fn get_serial_type_to_content(
+    page: &Page,
+    offset: &mut u16,
+    n: VarintType,
+) -> anyhow::Result<SerialTypeValue> {
+    let cont = &page.contents[*offset as usize..];
+
+    let (val, read) = match n {
+        0 => (SerialTypeValue::Null(None), 0u16),
+        1 => (SerialTypeValue::Int8(i8::from_be_bytes([cont[0]])), 1),
+        2 => (
+            SerialTypeValue::Int16(i16::from_be_bytes([cont[0], cont[1]])),
+            2,
+        ),
+        3 => (
+            SerialTypeValue::Int24(i32::from_be_bytes([0, cont[0], cont[1], cont[2]])),
+            3,
+        ),
+        4 => (
+            SerialTypeValue::Int32(i32::from_be_bytes([cont[0], cont[1], cont[2], cont[3]])),
+            4,
+        ),
+        5 => (
+            SerialTypeValue::Int48(i64::from_be_bytes([
+                0, 0, cont[0], cont[1], cont[2], cont[3], cont[4], cont[5],
+            ])),
+            6,
+        ),
+        6 => (
+            SerialTypeValue::Int64(i64::from_be_bytes([
+                cont[0], cont[1], cont[2], cont[3], cont[4], cont[5], cont[6], cont[7],
+            ])),
+            8,
+        ),
+        7 => (
+            SerialTypeValue::Float64(f64::from_be_bytes([
+                cont[0], cont[1], cont[2], cont[3], cont[4], cont[5], cont[6], cont[7],
+            ])),
+            8,
+        ),
+        8 => (SerialTypeValue::Zero, 0),
+        9 => (SerialTypeValue::One, 0),
+        10 | 11 => return Err(Error::from(VarintError::Reserved(n))),
+        12..=VarintType::MAX => {
+            if n % 2 == 0 {
+                // Blob
+                let size = (n as usize - 12) / 2;
+                (SerialTypeValue::Blob(cont[..size].to_vec()), size as u16)
+            } else {
+                // Text
+                let size = (n as usize - 13) / 2;
+                (
+                    SerialTypeValue::Text(String::from_utf8(cont[..size].to_vec())?),
+                    size as u16,
+                )
+            }
+        }
+        _ => return Err(Error::from(VarintError::Unsupported(n))),
+    };
+
+    *offset += read;
+
+    Ok(val)
+}
+
+#[allow(unused)]
 /// Reads a single *serial type* from a database file.
 ///
 /// Takes a varint, `n`.
@@ -160,6 +243,41 @@ pub(crate) fn read_serial_type_to_content(
     Ok((val, read))
 }
 
+/// Takes a [`Page`] and a supported integer length, and reads an integer of the given length from the
+/// provided `offset` in the page contents and returns it.
+///
+/// Supported input values are `1..=6` for the length of the integer, `int_len`.
+///
+/// The returned value is a twos-complement integer.
+///
+/// See [The Record Format](https://www.sqlite.org/fileformat.html#record_format).
+///
+/// # Returns
+///
+/// Returns a 2-tuple of (the decoded integer value, the number of bytes read).
+pub(crate) fn get_serial_type_integer(
+    page: &Page,
+    offset: u16,
+    mut int_len: u64,
+) -> anyhow::Result<(i64, u64)> {
+    assert!((1..=6).contains(&int_len));
+    if int_len == 5 {
+        int_len = 6;
+    } else if int_len == 6 {
+        int_len = 8;
+    }
+
+    let mut buf = [0u8; 8];
+    for i in 0..int_len as usize {
+        let byte = page.contents[offset as usize + i];
+        buf[8 - int_len as usize + i] = byte;
+    }
+    let integer = i64::from_be_bytes(buf);
+
+    Ok((integer, int_len))
+}
+
+#[allow(unused)]
 /// Takes a file handle and a supported integer length, and reads an integer of the given length from the
 /// current position in the file and returns it.
 ///
@@ -174,7 +292,7 @@ pub(crate) fn read_serial_type_to_content(
 /// # Returns
 ///
 /// Returns a 2-tuple of (the decoded integer value, the number of bytes read).
-pub fn decode_serial_type_integer(
+pub(crate) fn read_serial_type_integer(
     db_file: &mut File,
     mut int_len: u64,
 ) -> anyhow::Result<(i64, u64)> {
@@ -199,8 +317,11 @@ pub fn decode_serial_type_integer(
 #[cfg(test)]
 mod tests {
     use crate::constants::VarintType;
+    use crate::dot_cmd;
+    use crate::page::Page;
     use crate::serial_type::{
-        decode_serial_type_integer, read_serial_type_to_content, SerialTypeValue,
+        get_serial_type_integer, get_serial_type_to_content, read_serial_type_integer,
+        read_serial_type_to_content, SerialTypeValue,
     };
     use std::fs::File;
     use std::io::{Seek, SeekFrom};
@@ -218,6 +339,20 @@ mod tests {
     }
 
     #[test]
+    fn get_serial_type_null() {
+        // Not meant as a serial type contents in the DB file, but it serves the purpose of testing the function.
+        let expected = SerialTypeValue::Null(None);
+        let mut db_file = File::open("sample.db").unwrap();
+        let page_size = dot_cmd::page_size("sample.db").unwrap();
+        let page = Page::new(&mut db_file, page_size, 1).unwrap();
+        let mut offset = 0x20; // byte 0x00
+        let n: VarintType = 0;
+        let result = get_serial_type_to_content(&page, &mut offset, n).unwrap();
+        assert_eq!(expected, result);
+        assert_eq!(0x20, offset);
+    }
+
+    #[test]
     fn read_serial_type_int8() {
         // Really meant as a serial type contents in the DB file.
         // This is a value from a "seq" column of the "sqlite_sequence" table in the "sample.db" file.
@@ -228,6 +363,20 @@ mod tests {
         let result = read_serial_type_to_content(&mut db_file, n).unwrap();
         assert_eq!(expected, result.0);
         assert_eq!(1, result.1);
+    }
+
+    #[test]
+    fn get_serial_type_int8() {
+        // Not meant as a serial type contents in the DB file, but it serves the purpose of testing the function.
+        let expected = SerialTypeValue::Int8(6_i8);
+        let mut db_file = File::open("sample.db").unwrap();
+        let page_size = dot_cmd::page_size("sample.db").unwrap();
+        let page = Page::new(&mut db_file, page_size, 3).unwrap();
+        let mut offset = (0x2ff3 - 2 * page_size) as u16; // byte 0x06
+        let n: VarintType = 1;
+        let result = get_serial_type_to_content(&page, &mut offset, n).unwrap();
+        assert_eq!(expected, result);
+        assert_eq!((0x2ff3 - 2 * page_size + 1) as u16, offset);
     }
 
     #[test]
@@ -269,12 +418,25 @@ mod tests {
     /// Really meant as a serial type integer in the DB file; a single byte, though.
     /// This is the "apples" table's rootpage number, stored at offset 0xfa9 from the beginning of the DB file.
     #[test]
-    fn decode_apples_rootpage() {
+    fn read_apples_rootpage() {
         let expected: i64 = 0x2; // dec 2
         let mut db_file = File::open("sample.db").unwrap();
         let _pos = db_file.seek(SeekFrom::Start(0x0fa9)).unwrap(); // byte 0x02
         let int_len = 1;
-        let result = decode_serial_type_integer(&mut db_file, int_len).unwrap();
+        let result = read_serial_type_integer(&mut db_file, int_len).unwrap();
+        assert_eq!(expected, result.0);
+        assert_eq!(1, result.1);
+    }
+
+    #[test]
+    fn get_apples_rootpage() {
+        let expected: i64 = 0x2; // dec 2
+        let page_size = dot_cmd::page_size("sample.db").unwrap();
+        let mut db_file = File::open("sample.db").unwrap();
+        let page = Page::new(&mut db_file, page_size, 1).unwrap();
+        let offset = 0x0fa9; // byte 0x02
+        let int_len = 1;
+        let result = get_serial_type_integer(&page, offset, int_len).unwrap();
         assert_eq!(expected, result.0);
         assert_eq!(1, result.1);
     }
@@ -282,12 +444,25 @@ mod tests {
     /// Not meant as a serial type integer in the DB file, but it serves the purpose of testing the function;
     /// three bytes at offset 0x3f74.
     #[test]
-    fn decode_three_byte_integer() {
+    fn read_three_byte_integer() {
         let expected: i64 = 0x6d656e; // dec 7169390
         let mut db_file = File::open("sample.db").unwrap();
         let _pos = db_file.seek(SeekFrom::Start(0x3f74)).unwrap(); // bytes 0x6d 0x65 0x6e
         let int_len = 3;
-        let result = decode_serial_type_integer(&mut db_file, int_len).unwrap();
+        let result = read_serial_type_integer(&mut db_file, int_len).unwrap();
+        assert_eq!(expected, result.0);
+        assert_eq!(3, result.1);
+    }
+
+    #[test]
+    fn get_three_byte_integer() {
+        let expected: i64 = 0x6d656e; // dec 7169390
+        let page_size = dot_cmd::page_size("sample.db").unwrap();
+        let mut db_file = File::open("sample.db").unwrap();
+        let page = Page::new(&mut db_file, page_size, 4).unwrap();
+        let offset = (0x3f74 - 3 * page_size) as u16; // bytes 0x6d 0x65 0x6e
+        let int_len = 3;
+        let result = get_serial_type_integer(&page, offset, int_len).unwrap();
         assert_eq!(expected, result.0);
         assert_eq!(3, result.1);
     }
@@ -301,12 +476,25 @@ mod tests {
     /// Another thing which makes this test comprehensive is that we are converting serial type 6
     /// to content size 8.
     #[test]
-    fn decode_eight_byte_integer() {
+    fn read_eight_byte_integer() {
         let expected: i64 = 0x3b_54_61_6e_67_65_72_69; // dec 4275149073090441833
         let mut db_file = File::open("sample.db").unwrap();
         let _pos = db_file.seek(SeekFrom::Start(0x3fa4)).unwrap(); // hex bytes: 3b 54 61 6e  67 65 72 69
         let int_len = 6;
-        let result = decode_serial_type_integer(&mut db_file, int_len).unwrap();
+        let result = read_serial_type_integer(&mut db_file, int_len).unwrap();
+        assert_eq!(expected, result.0);
+        assert_eq!(8, result.1);
+    }
+
+    #[test]
+    fn get_eight_byte_integer() {
+        let expected: i64 = 0x3b_54_61_6e_67_65_72_69; // dec 4275149073090441833
+        let page_size = dot_cmd::page_size("sample.db").unwrap();
+        let mut db_file = File::open("sample.db").unwrap();
+        let page = Page::new(&mut db_file, page_size, 4).unwrap();
+        let offset = (0x3fa4 - 3 * page_size) as u16; // hex bytes: 3b 54 61 6e  67 65 72 69
+        let int_len = 6;
+        let result = get_serial_type_integer(&page, offset, int_len).unwrap();
         assert_eq!(expected, result.0);
         assert_eq!(8, result.1);
     }

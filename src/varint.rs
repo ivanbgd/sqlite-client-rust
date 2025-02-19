@@ -12,10 +12,42 @@
 //! 64-bit signed integers defined above.
 
 use crate::constants::{VarintType, MAX_VARINT_LEN, VARINT_MASK};
+use crate::page::Page;
 use anyhow::Result;
 use std::fs::File;
 use std::io::Read;
 
+/// Gets a single *varint* from a [`Page`] contents that's loaded in memory.
+///
+/// Reads from the given `offset` in the page - the `offset` is relative to the page contents start.
+///
+/// It updates `offset` so it can be reused after being updated in this function.
+/// This means that `offset` is an in-out parameter.
+///
+/// Stops reading when it determines the varint end. So, it does **not** read excess bytes.
+///
+/// # Returns
+///
+/// Returns the decoded *varint* value.
+pub(crate) fn get_varint(page: &Page, offset: &mut u16) -> Result<VarintType> {
+    let mut varint = [0u8; MAX_VARINT_LEN];
+
+    let mut i = 0;
+    loop {
+        let byte = page.contents[*offset as usize + i];
+        varint[i] = byte;
+        i += 1;
+        if byte & VARINT_MASK == 0 {
+            break;
+        }
+    }
+
+    *offset += i as u16;
+
+    Ok(decode_varint(&varint))
+}
+
+#[allow(unused)]
 /// Reads a single *varint* from a database file.
 ///
 /// Takes a file handle and reads from the current position in it.
@@ -67,7 +99,9 @@ fn decode_varint(buf: &[u8]) -> VarintType {
 /// A database file, "sample.db", is used and it is included in the repository, but its size is only 16 kiB.
 #[cfg(test)]
 mod tests {
-    use crate::varint::{decode_varint, read_varint};
+    use crate::dot_cmd;
+    use crate::page::Page;
+    use crate::varint::{decode_varint, get_varint, read_varint};
     use std::fs::File;
     use std::io::{Seek, SeekFrom};
 
@@ -136,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn read_varint_1a() {
+    fn read_varint_1() {
         // Really meant as a varint in the DB file; a single byte, though.
         let expected = 0x78; // dec 120
         let mut db_file = File::open("sample.db").unwrap();
@@ -147,9 +181,22 @@ mod tests {
     }
 
     #[test]
+    fn get_varint_1() {
+        // Really meant as a varint in the DB file; a single byte, though.
+        let expected = 0x78; // dec 120
+        let mut db_file = File::open("sample.db").unwrap();
+        let page_size = dot_cmd::page_size("sample.db").unwrap();
+        let page = Page::new(&mut db_file, page_size, 1).unwrap();
+        let mut offset = 0x0ec3; // byte 0x78
+        let result = get_varint(&page, &mut offset).unwrap();
+        assert_eq!(expected, result);
+        assert_eq!(0x0ec3 + 1, offset);
+    }
+
+    #[test]
     fn read_varint_2() {
         // Not meant as a varint in the DB file, but it serves the purpose of testing the function; two bytes.
-        let expected = 0x78f; // dec 1935
+        let expected = 0x078f; // dec 1935
         let mut db_file = File::open("sample.db").unwrap();
         let _pos = db_file.seek(SeekFrom::Start(0x6d)).unwrap(); // bytes 0x8f 0x0f
         let result = read_varint(&mut db_file).unwrap();
@@ -166,5 +213,29 @@ mod tests {
         let result = read_varint(&mut db_file).unwrap();
         assert_eq!(expected, result.0);
         assert_eq!(2, result.1);
+    }
+
+    #[test]
+    fn read_varint_4() {
+        // Not meant as a varint in the DB file, but it serves the purpose of testing the function; two bytes.
+        let expected = 0x340f; // dec 13327
+        let mut db_file = File::open("test_dbs/superheroes.db").unwrap();
+        let _pos = db_file.seek(SeekFrom::Start(0x100b)).unwrap(); // bytes 0xe8 0x0f
+        let result = read_varint(&mut db_file).unwrap();
+        assert_eq!(expected, result.0);
+        assert_eq!(2, result.1);
+    }
+
+    #[test]
+    fn get_varint_4() {
+        // Not meant as a varint in the DB file, but it serves the purpose of testing the function; two bytes.
+        let expected = 0x340f; // dec 13327
+        let mut db_file = File::open("test_dbs/superheroes.db").unwrap();
+        let page_size = dot_cmd::page_size("test_dbs/superheroes.db").unwrap();
+        let page = Page::new(&mut db_file, page_size, 2).unwrap();
+        let mut offset = (0x100b - page_size) as u16; // bytes 0xe8 0x0f
+        let result = get_varint(&page, &mut offset).unwrap();
+        assert_eq!(expected, result);
+        assert_eq!((0x100b - page_size + 2) as u16, offset);
     }
 }

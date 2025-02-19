@@ -5,11 +5,12 @@
 use crate::constants::{ColumnNameOrd, COUNT_PATTERN, FROM_PATTERN, SELECT_PATTERN, WHERE_PATTERN};
 use crate::dot_cmd;
 use crate::errors::SqlError;
+use crate::page::{Page, PageType};
 use crate::serial_type::{
-    read_serial_type_to_content, serial_type_to_content_size, SerialTypeValue,
+    get_serial_type_to_content, serial_type_to_content_size, SerialTypeValue,
 };
 use crate::tables::{get_tables_meta, SchemaTable};
-use crate::varint::read_varint;
+use crate::varint::get_varint;
 use anyhow::Result;
 use std::collections::HashSet;
 use std::fs::File;
@@ -71,37 +72,74 @@ pub fn select(db_file_path: &str, mut command: &str) -> Result<Vec<String>> {
 
 /// `SELECT COUNT(*) FROM <table>`
 ///
-/// A leaf page for the table is assumed.
-///
 /// Returns error if the table does not exist.
-fn select_count_rows_in_table(db_file_path: &str, table_name: &str) -> Result<u16> {
+fn select_count_rows_in_table(db_file_path: &str, table_name: &str) -> Result<u64> {
     let table_name = &table_name.to_lowercase();
     let tables_meta = get_tables_meta(db_file_path)?;
 
     if tables_meta.0.contains_key(table_name) {
         // We've found the requested table, `table_name`.
-        let table = &tables_meta.0[table_name];
-        // Now we need to jump to its page and read the requested data.
-        let rootpage = table.rootpage;
-        // Pages are numbered from one, i.e., they are 1-indexed, so subtract one to get to the page.
         let page_size = dot_cmd::page_size(db_file_path)?;
-        let page_offset = (rootpage - 1) * page_size as u64;
         let mut db_file = File::open(db_file_path)?;
-
-        // The two-byte integer at offset 3 gives the number of cells on the page.
-        // This is part of the page header, and it represents the number of rows on this page.
-        let offset = page_offset + 3;
-        let mut buf = [0u8; 2];
-        let _pos = db_file.seek(SeekFrom::Start(offset))?;
-        db_file.read_exact(&mut buf)?;
-        // All multibyte values in the page header are big-endian.
-        let num_rows = u16::from_be_bytes(buf);
-
+        let table = &tables_meta.0[table_name];
+        // Now we need to jump to its pages and read the requested data.
+        let page_num = table.rootpage;
+        let page = Page::new(&mut db_file, page_size, page_num)?;
+        let num_rows = count_rows_in_order_rec(&mut db_file, page_size, page)?;
         Ok(num_rows)
     } else {
         // In case a table with the given name, `table_name`, does not exist in the database, return that error.
         Err(SqlError::NoSuchTable(table_name.to_string()))?
     }
+}
+
+/// Recursive implementation of in-order traversal for B-tree, for counting rows in a table
+///
+/// Traverses a B-tree, visiting each node (page).
+///
+/// Starts with the provided page, which, in general case, doesn't have to be the root page
+/// of the entire database, but it should be a root page of a table.
+///
+/// Returns total number of data rows in a table, i.e., the total number of cells in table leaf pages.
+///
+/// Table interior pages don't store data. Their cells store pointers and don't count toward data rows.
+fn count_rows_in_order_rec(db_file: &mut File, page_size: u32, page: Page) -> Result<u64> {
+    let mut num_rows = 0u64;
+
+    let page_start = (page.page_num - 1) * page_size;
+    let page_header = page.get_header();
+    let page_type = page_header.page_type;
+
+    // The format of a cell (B-tree Cell Format) depends on which kind of b-tree page the cell appears on (the current page).
+    match page_type {
+        PageType::LeafTable => {
+            return Ok(page_header.num_cells as u64);
+        }
+        PageType::InteriorTable => {
+            for cell_ptr in page.get_cell_ptr_array() {
+                // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
+                let _pos = db_file.seek(SeekFrom::Start(page_start as u64 + cell_ptr as u64))?;
+                // Cell contains: (Page number of left child, Rowid) as (u32, varint).
+                let mut buf = [0u8; 4];
+                db_file.read_exact(&mut buf)?;
+                let page_num = u32::from_be_bytes(buf);
+                let left_child = Page::new(db_file, page_size, page_num)?;
+                num_rows += count_rows_in_order_rec(db_file, page_size, left_child)?;
+            }
+        }
+        // TODO: Add index types!
+        other => panic!("Page type {other:?} encountered where it shouldn't be!"),
+    }
+    // Visit the rightmost child.
+    if page_type == PageType::InteriorTable {
+        let page_num = page_header.rightmost_ptr.expect("Expected interior table.");
+        // Rightmost pointer is page number of the rightmost child.
+        let right_child = Page::new(db_file, page_size, page_num)?;
+        num_rows += count_rows_in_order_rec(db_file, page_size, right_child)?;
+    }
+    // TODO: Add interior index type?!
+
+    Ok(num_rows)
 }
 
 /// `SELECT <column_1>, ..., <column_n> FROM <table> LIMIT <limit>`
@@ -140,9 +178,9 @@ fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<S
             .trim()
             .parse::<u64>()
             .map_err(|_| SqlError::LimitParsingError(limit.trim().to_string()))?;
-        limit.min(select_count_rows_in_table(db_file_path, table_name)? as u64)
+        limit.min(select_count_rows_in_table(db_file_path, table_name)?)
     } else {
-        select_count_rows_in_table(db_file_path, table_name)? as u64
+        select_count_rows_in_table(db_file_path, table_name)?
     };
 
     let tables_meta = get_tables_meta(db_file_path)?;
@@ -152,21 +190,17 @@ fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<S
         Err(SqlError::NoSuchTable(table_name.to_string()))?
     }
 
-    // We've found the requested table, `table_name`.
-    let table = &tables_meta.0[table_name];
-    // Now we need to jump to its page and read the requested data.
-    let rootpage = table.rootpage;
-    // Pages are numbered from one, i.e., they are 1-indexed, so subtract one to get to the page.
-    let page_size = dot_cmd::page_size(db_file_path)?;
-    let page_offset = (rootpage - 1) * page_size as u64;
-    let db_file = &mut File::open(db_file_path)?;
-
     let mut result = Vec::with_capacity(num_rows as usize);
 
-    // Since this is a leaf page, its header is eight-bytes long, so we have to skip that many bytes
-    // from the start of the page to get to the cell pointer array which represents offsets to the cell contents,
-    // i.e., offsets to rows.
-    let cell_ptr = page_offset + 8;
+    let page_size = dot_cmd::page_size(db_file_path)?;
+    let db_file = &mut File::open(db_file_path)?;
+
+    // We've found the requested table, `table_name`.
+    let table = &tables_meta.0[table_name];
+    // Now we need to jump to its pages and read the requested data.
+    let page_num = table.rootpage;
+
+    let page = Page::new(db_file, page_size, page_num)?;
 
     // We choose between two pairs of similar functions because of a performance optimization.
     // Generally, we don't need two functions for either functionality.
@@ -174,12 +208,11 @@ fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<S
         None => {
             let (desired_columns, num_all_cols) = column_order(column_names, table_name, table)?;
 
-            get_columns_data_for_all_rows(
+            select_columns_in_order_rec(
                 db_file,
+                page_size,
+                page,
                 num_all_cols,
-                num_rows,
-                cell_ptr,
-                page_offset,
                 &desired_columns,
                 &mut result,
             )?;
@@ -192,20 +225,167 @@ fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<S
             let (_where_col_name, where_col_ord) = where_column;
             let where_triple = (where_col_name, where_col_ord, where_col_value);
 
-            get_columns_data_for_all_rows_where(
+            select_columns_in_order_rec_where(
                 db_file,
+                page_size,
+                page,
                 num_all_cols,
-                num_rows,
-                cell_ptr,
-                page_offset,
                 &desired_columns,
-                where_triple,
+                &where_triple,
                 &mut result,
             )?;
         }
     }
 
+    let limit = num_rows.min(result.len() as u64) as usize;
+    let result = result[..limit].to_owned();
+
     Ok(result)
+}
+
+/// Recursive implementation of in-order traversal for B-tree, for selecting columns from a table
+///
+/// Used without `WHERE` clause.
+///
+/// Traverses a B-tree, visiting each node (page).
+///
+/// Starts with the provided page, which, in general case, doesn't have to be the root page
+/// of the entire database, but it should be a root page of a table.
+///
+/// Table interior pages don't store data. Their cells store pointers and don't count toward data rows.
+fn select_columns_in_order_rec(
+    db_file: &mut File,
+    page_size: u32,
+    page: Page,
+    num_all_cols: usize,
+    desired_columns: &Vec<(String, usize)>,
+    result: &mut Vec<String>,
+) -> Result<()> {
+    let page_header = page.get_header();
+    let page_type = page_header.page_type;
+
+    // The format of a cell (B-tree Cell Format) depends on which kind of b-tree page the cell appears on (the current page).
+    match page_type {
+        PageType::LeafTable => {
+            get_columns_data_for_all_rows_on_table_leaf_page(
+                &page,
+                num_all_cols,
+                desired_columns,
+                result,
+            )?;
+        }
+        PageType::InteriorTable => {
+            for cell_ptr in page.get_cell_ptr_array() {
+                // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
+                let page_num = &page.contents[cell_ptr as usize..][..4];
+                // Cell contains: (Page number of left child, Rowid) as (u32, varint).
+                let page_num = u32::from_be_bytes(page_num.try_into()?);
+                let left_child = Page::new(db_file, page_size, page_num)?;
+                select_columns_in_order_rec(
+                    db_file,
+                    page_size,
+                    left_child,
+                    num_all_cols,
+                    desired_columns,
+                    result,
+                )?;
+            }
+        }
+        // TODO: Add index types!
+        other => panic!("Page type {other:?} encountered where it shouldn't be!"),
+    }
+    // Visit the rightmost child.
+    if page_type == PageType::InteriorTable {
+        let page_num = page_header.rightmost_ptr.expect("Expected interior table.");
+        // Rightmost pointer is page number of the rightmost child.
+        let right_child = Page::new(db_file, page_size, page_num)?;
+        select_columns_in_order_rec(
+            db_file,
+            page_size,
+            right_child,
+            num_all_cols,
+            desired_columns,
+            result,
+        )?;
+    }
+    // TODO: Add interior index type?!
+
+    Ok(())
+}
+
+/// Recursive implementation of in-order traversal for B-tree, for selecting columns from a table
+///
+/// Used with `WHERE` clause.
+///
+/// Traverses a B-tree, visiting each node (page).
+///
+/// Starts with the provided page, which, in general case, doesn't have to be the root page
+/// of the entire database, but it should be a root page of a table.
+///
+/// Table interior pages don't store data. Their cells store pointers and don't count toward data rows.
+#[allow(clippy::too_many_arguments)]
+fn select_columns_in_order_rec_where(
+    db_file: &mut File,
+    page_size: u32,
+    page: Page,
+    num_all_cols: usize,
+    desired_columns: &Vec<(String, usize)>,
+    where_triple: &(String, usize, &str),
+    result: &mut Vec<String>,
+) -> Result<()> {
+    let page_header = page.get_header();
+    let page_type = page_header.page_type;
+
+    // The format of a cell (B-tree Cell Format) depends on which kind of b-tree page the cell appears on (the current page).
+    match page_type {
+        PageType::LeafTable => {
+            get_columns_data_for_all_rows_on_table_leaf_page_where(
+                &page,
+                num_all_cols,
+                desired_columns,
+                where_triple,
+                result,
+            )?;
+        }
+        PageType::InteriorTable => {
+            for cell_ptr in page.get_cell_ptr_array() {
+                // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
+                let page_num = &page.contents[cell_ptr as usize..][..4];
+                // Cell contains: (Page number of left child, Rowid) as (u32, varint).
+                let page_num = u32::from_be_bytes(page_num.try_into()?);
+                let left_child = Page::new(db_file, page_size, page_num)?;
+                select_columns_in_order_rec_where(
+                    db_file,
+                    page_size,
+                    left_child,
+                    num_all_cols,
+                    desired_columns,
+                    where_triple,
+                    result,
+                )?;
+            }
+        }
+        // TODO: Add index types!
+        other => panic!("Page type {other:?} encountered where it shouldn't be!"),
+    }
+    // Visit the rightmost child.
+    if page_type == PageType::InteriorTable {
+        let page_num = page_header.rightmost_ptr.expect("Expected interior table.");
+        // Rightmost pointer is page number of the rightmost child.
+        let right_child = Page::new(db_file, page_size, page_num)?;
+        select_columns_in_order_rec_where(
+            db_file,
+            page_size,
+            right_child,
+            num_all_cols,
+            desired_columns,
+            where_triple,
+            result,
+        )?;
+    }
+    // TODO: Add interior index type?!
+
+    Ok(())
 }
 
 /// Returns arguments of a `WHERE` clause if it exists, otherwise `None`.
@@ -236,7 +416,7 @@ fn get_where_args(command_rest: &str) -> Result<Option<(&str, &str)>> {
 ///
 /// Concretely, returns a tuple of: (a vector of desired columns, the number of all columns in the table).
 ///
-/// A desired column is a tuples itself which comprises a column name and its ordinal.
+/// A desired column is a tuple itself which comprises a column name and its ordinal.
 fn column_order(
     column_names: &str,
     table_name: &str,
@@ -460,15 +640,15 @@ fn column_order_where(
     Ok((desired_columns, num_all_cols, where_column))
 }
 
-/// Gets data from desired columns for all rows in the table.
+/// Gets data from desired columns for all rows on the table leaf page.
+///
+/// Takes the in-out `result` parameter which it adds to, so added items can be used
+/// through that parameter after the function returns.
 ///
 /// It is optimized, so it doesn't support the `WHERE` clause.
-fn get_columns_data_for_all_rows(
-    db_file: &mut File,
+fn get_columns_data_for_all_rows_on_table_leaf_page(
+    page: &Page,
     num_all_cols: usize,
-    num_rows: u64,
-    mut cell_ptr: u64,
-    page_offset: u64,
     desired_columns: &Vec<(String, usize)>,
     result: &mut Vec<String>,
 ) -> Result<()> {
@@ -476,26 +656,21 @@ fn get_columns_data_for_all_rows(
     // of cells on the btree. The cell pointer array consists of K 2-byte integer offsets to the cell contents.
     // The cell pointers are arranged in key order with left-most cell (the cell with the smallest key) first and
     // the right-most cell (the cell with the largest key) last." - from the official documentation.
+    let cell_ptr_array = page.get_cell_ptr_array();
 
-    // Loop over all rows in the table.
-    for _ in 0..num_rows {
-        let mut buf = [0u8; 2];
-        let _pos = db_file.seek(SeekFrom::Start(cell_ptr))?;
-        db_file.read_exact(&mut buf)?;
-        // All multibyte values in the page header are big-endian.
-        let row_offset = u16::from_be_bytes(buf);
-
-        cell_ptr += 2;
+    // Loop over all rows (cells) on the page. A row is a cell, so num_rows == page_header.num_cells.
+    for i in 0..page.get_header().num_cells {
+        let cell_ptr = cell_ptr_array[i as usize];
 
         let mut row_result = String::new();
 
         // Loop over the desired columns.
         for (column_name, column_ordinal) in desired_columns {
-            let _pos = db_file.seek(SeekFrom::Start(page_offset + row_offset as u64))?;
+            let mut offset = cell_ptr;
 
             // B-tree Cell Format
-            let (_payload_size, _read) = read_varint(db_file)?;
-            let (row_id, _read) = read_varint(db_file)?;
+            let _payload_size = get_varint(page, &mut offset)?;
+            let row_id = get_varint(page, &mut offset)?;
 
             if *column_name == "id" {
                 row_result += &(row_id.to_string() + "|");
@@ -510,11 +685,12 @@ fn get_columns_data_for_all_rows(
             // A record contains a header and a body, in that order.
             // The header begins with a single varint which determines the total number of bytes in the header.
             // The varint value is the size of the header in bytes including the size varint itself.
-            let header_start = db_file.stream_position()?; // Needed for an optimization below.
-            let (header_size, read) = read_varint(db_file)?;
+            let header_start = offset; // Needed for an optimization below.
+            let header_size = get_varint(page, &mut offset)?;
             // Following the size varint are one or more additional varints, one per column.
             // These additional varints are called "serial type" numbers and determine the datatype of each column.
             // The header size varint and serial type varints will usually consist of a single byte, but they could be longer, so let's determine the size in bytes.
+            let read = (offset - header_start) as u64;
             let _column_data_size = header_size as u64 - read; // Not used.
 
             let mut column_serial_type = 0;
@@ -524,7 +700,7 @@ fn get_columns_data_for_all_rows(
             // We don't want to read and extract sizes of all columns.
             // That wouldn't be efficient, especially in case there's a lot of columns in the table.
             for col_ind in 0..num_all_cols {
-                let (col_serial_type, _read) = read_varint(db_file)?;
+                let col_serial_type = get_varint(page, &mut offset)?;
                 column_serial_type = col_serial_type;
                 let column_content_size = serial_type_to_content_size(column_serial_type)? as u64;
                 if col_ind == *column_ordinal {
@@ -532,16 +708,19 @@ fn get_columns_data_for_all_rows(
                 }
                 column_offset += column_content_size;
             }
-            let offset = header_start + header_size as u64 + column_offset;
-            let _pos = db_file.seek(SeekFrom::Start(offset))?;
-            // eprintln!("_pos = {_pos:04x}, offset = {offset:04x}");
-            let column_contents = match read_serial_type_to_content(db_file, column_serial_type)? {
-                (SerialTypeValue::Text(column_contents), _read) => column_contents,
-                (SerialTypeValue::Int8(column_contents), _read) => column_contents.to_string(),
-                (stv, read) => panic!(
-                    "Got unexpected type for column '{column_name}': {stv:?}; read {read} byte(s)."
-                ),
-            };
+            let mut offset = header_start + header_size as u16 + column_offset as u16;
+            let old_offset = offset;
+            // eprintln!("offset = 0x{offset:04x}");
+            let column_contents =
+                match get_serial_type_to_content(page, &mut offset, column_serial_type)? {
+                    SerialTypeValue::Null(_) => "".to_string(),
+                    SerialTypeValue::Text(column_contents) => column_contents,
+                    SerialTypeValue::Int8(column_contents) => column_contents.to_string(),
+                    stv => panic!(
+                        "Got unexpected type for column '{column_name}': {stv:?}; read {} byte(s).",
+                        offset - old_offset
+                    ),
+                };
             row_result += &(column_contents + "|");
         }
 
@@ -551,41 +730,42 @@ fn get_columns_data_for_all_rows(
     Ok(())
 }
 
-/// Gets data from desired columns for all rows in the table, taking an optional `WHERE` clause into account.
+/// Gets data from desired columns for all rows on the page, taking an optional `WHERE` clause into account.
+///
+/// Takes the in-out `result` parameter which it adds to, so added items can be used
+/// through that parameter after the function returns.
 ///
 /// `WHERE` triple is a 3-tuple of a column name, the column ordinal and a desired column value.
-#[allow(clippy::too_many_arguments)]
-fn get_columns_data_for_all_rows_where(
-    db_file: &mut File,
+fn get_columns_data_for_all_rows_on_table_leaf_page_where(
+    page: &Page,
     num_all_cols: usize,
-    num_rows: u64,
-    mut cell_ptr: u64,
-    page_offset: u64,
     desired_columns: &Vec<(String, usize)>,
-    where_triple: (String, usize, &str),
+    where_triple: &(String, usize, &str),
     result: &mut Vec<String>,
 ) -> Result<()> {
-    let (where_col_name, where_col_ord, where_col_value) = where_triple;
+    let (where_col_name, where_col_ord, where_col_value) = where_triple.clone();
 
-    // Loop over all rows in the table.
-    for _ in 0..num_rows {
-        let mut buf = [0u8; 2];
-        let _pos = db_file.seek(SeekFrom::Start(cell_ptr))?;
-        db_file.read_exact(&mut buf)?;
-        // All multibyte values in the page header are big-endian.
-        let row_offset = u16::from_be_bytes(buf);
+    // "The cell pointer array of a b-tree page immediately follows the b-tree page header. Let K be the number
+    // of cells on the btree. The cell pointer array consists of K 2-byte integer offsets to the cell contents.
+    // The cell pointers are arranged in key order with left-most cell (the cell with the smallest key) first and
+    // the right-most cell (the cell with the largest key) last." - from the official documentation.
+    let cell_ptr_array = page.get_cell_ptr_array();
+    assert_eq!(cell_ptr_array.len(), page.get_header().num_cells.into());
 
-        cell_ptr += 2;
+    // Loop over all rows (cells) on the page. A row is a cell, so num_rows == page_header.num_cells,
+    // but a user can LIMIT the number of rows, so we have to account for that.
+    for i in 0..page.get_header().num_cells {
+        let cell_ptr = cell_ptr_array[i as usize];
 
         let mut row_result = String::new();
 
         // Loop over the desired columns.
         for (column_name, column_ordinal) in desired_columns {
-            let _pos = db_file.seek(SeekFrom::Start(page_offset + row_offset as u64))?;
+            let mut offset = cell_ptr;
 
             // B-tree Cell Format
-            let (_payload_size, _read) = read_varint(db_file)?;
-            let (row_id, _read) = read_varint(db_file)?;
+            let _payload_size = get_varint(page, &mut offset)?;
+            let row_id = get_varint(page, &mut offset)?;
 
             if *column_name == "id" {
                 row_result += &(row_id.to_string() + "|");
@@ -593,8 +773,8 @@ fn get_columns_data_for_all_rows_where(
             }
 
             // Now comes payload, as a byte array, or actual rows (records).
-            let header_start = db_file.stream_position()?; // Needed for an optimization below.
-            let (header_size, _read) = read_varint(db_file)?;
+            let header_start = offset; // Needed for an optimization below.
+            let header_size = get_varint(page, &mut offset)?;
 
             // Following the size varint are one or more additional varints, one per column.
             let mut column_serial_type = 0;
@@ -604,7 +784,7 @@ fn get_columns_data_for_all_rows_where(
             // We don't want to read and extract sizes of all columns.
             // That wouldn't be efficient, especially in case there's a lot of columns in the table.
             for col_ind in 0..num_all_cols {
-                let (col_serial_type, _read) = read_varint(db_file)?;
+                let col_serial_type = get_varint(page, &mut offset)?;
                 column_serial_type = col_serial_type;
                 let column_content_size = serial_type_to_content_size(column_serial_type)? as u64;
                 if col_ind == *column_ordinal {
@@ -612,23 +792,25 @@ fn get_columns_data_for_all_rows_where(
                 }
                 column_offset += column_content_size;
             }
-            let offset = header_start + header_size as u64 + column_offset;
-            let _pos = db_file.seek(SeekFrom::Start(offset))?;
-            // eprintln!("_pos = {_pos:04x}, offset = {offset:04x}");
-            let column_contents = match read_serial_type_to_content(db_file, column_serial_type)? {
-                (SerialTypeValue::Text(column_contents), _read) => column_contents,
-                (SerialTypeValue::Int8(column_contents), _read) => column_contents.to_string(),
-                (stv, read) => panic!(
-                    "Got unexpected type for column '{column_name}': {stv:?}; read {read} byte(s)."
-                ),
-            };
+            let mut offset = header_start + header_size as u16 + column_offset as u16;
+            let old_offset = offset;
+            // eprintln!("offset = 0x{offset:04x}");
+            let column_contents =
+                match get_serial_type_to_content(page, &mut offset, column_serial_type)? {
+                    SerialTypeValue::Text(column_contents) => column_contents,
+                    SerialTypeValue::Int8(column_contents) => column_contents.to_string(),
+                    stv => panic!(
+                        "Got unexpected type for column '{column_name}': {stv:?}; read {} byte(s).",
+                        offset - old_offset
+                    ),
+                };
             row_result += &(column_contents + "|");
         }
 
         // Also check for the WHERE column.
-        let _pos = db_file.seek(SeekFrom::Start(page_offset + row_offset as u64))?;
-        let (_payload_size, _read) = read_varint(db_file)?;
-        let (row_id, _read) = read_varint(db_file)?;
+        let mut offset = cell_ptr;
+        let _payload_size = get_varint(page, &mut offset)?;
+        let row_id = get_varint(page, &mut offset)?;
         if where_col_name == "id" {
             if where_col_value == row_id.to_string() {
                 result.push(row_result.trim_end_matches('|').to_string());
@@ -637,13 +819,13 @@ fn get_columns_data_for_all_rows_where(
             }
             continue;
         }
-        let header_start = db_file.stream_position()?;
-        let (header_size, _read) = read_varint(db_file)?;
+        let header_start = offset;
+        let header_size = get_varint(page, &mut offset)?;
         let mut column_serial_type = 0;
         let mut column_offset = 0;
         let mut col_ord = usize::MAX;
         for col_ind in 0..num_all_cols {
-            let (col_serial_type, _read) = read_varint(db_file)?;
+            let col_serial_type = get_varint(page, &mut offset)?;
             column_serial_type = col_serial_type;
             let column_content_size = serial_type_to_content_size(column_serial_type)? as u64;
             if col_ind == where_col_ord {
@@ -652,15 +834,18 @@ fn get_columns_data_for_all_rows_where(
             }
             column_offset += column_content_size;
         }
-        let offset = header_start + header_size as u64 + column_offset;
-        let _pos = db_file.seek(SeekFrom::Start(offset))?;
-        let column_contents = match read_serial_type_to_content(db_file, column_serial_type)? {
-            (SerialTypeValue::Text(column_contents), _read) => column_contents,
-            (SerialTypeValue::Int8(column_contents), _read) => column_contents.to_string(),
-            (stv, read) => panic!(
-                "Got unexpected type for column '{where_col_name}': {stv:?}; read {read} byte(s)."
-            ),
-        };
+        let mut offset = header_start + header_size as u16 + column_offset as u16;
+        let old_offset = offset;
+        let column_contents =
+            match get_serial_type_to_content(page, &mut offset, column_serial_type)? {
+                SerialTypeValue::Null(_) => "".to_string(),
+                SerialTypeValue::Text(column_contents) => column_contents,
+                SerialTypeValue::Int8(column_contents) => column_contents.to_string(),
+                stv => panic!(
+                    "Got unexpected type for column '{where_col_name}': {stv:?}; read {} byte(s).",
+                    offset - old_offset
+                ),
+            };
         if (where_col_ord == col_ord) && (where_col_value == column_contents) {
             result.push(row_result.trim_end_matches('|').to_string());
         }
@@ -1199,5 +1384,60 @@ mod tests {
         let expected = vec!["1|Granny Smith|Light Green".to_string()];
         let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn select_count_rows_superheroes() {
+        let command = "SELECT COUNT(*) FROM superheroes";
+        let expected = 6895.to_string();
+        let result = &select("test_dbs/superheroes.db", command).unwrap()[0];
+        assert_eq!(expected, *result);
+    }
+
+    #[test]
+    fn select_id_from_superheroes() {
+        let command = "SELECT id FROM superheroes";
+        let expected: Vec<String> = (1u16..=6895).map(|n| n.to_string()).collect::<Vec<_>>();
+        let result = select("test_dbs/superheroes.db", command).unwrap();
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn select_id_name_from_superheroes_where_eye_color_pink_eyes() {
+        let command = "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes'";
+        let mut expected = vec![
+            "297|Stealth (New Earth)".to_string(),
+            "790|Tobias Whale (New Earth)".to_string(),
+            "1085|Felicity (New Earth)".to_string(),
+            "2729|Thrust (New Earth)".to_string(),
+            "3289|Angora Lapin (New Earth)".to_string(),
+            "3913|Matris Ater Clementia (New Earth)".to_string(),
+        ];
+        expected.sort();
+        let mut result = select("test_dbs/superheroes.db", command).unwrap();
+        result.sort();
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn select_id_name_from_superheroes_where_eye_color_pink_eyes_limit_3() {
+        let command = "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes' LIMIT 3";
+        let mut expected = vec![
+            "297|Stealth (New Earth)".to_string(),
+            "790|Tobias Whale (New Earth)".to_string(),
+            "1085|Felicity (New Earth)".to_string(),
+        ];
+        expected.sort();
+        let mut result = select("test_dbs/superheroes.db", command).unwrap();
+        result.sort();
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn select_count_rows_companies() {
+        let command = "SELECT COUNT(*) FROM companies";
+        let expected = 55991.to_string();
+        let result = &select("test_dbs/companies.db", command).unwrap()[0];
+        assert_eq!(expected, *result);
     }
 }

@@ -4,7 +4,7 @@
 //!
 //! [Database File Format](https://www.sqlite.org/fileformat.html)
 
-use crate::constants::HEADER;
+use crate::constants::DB_HEADER;
 use crate::errors::DotCmdError;
 use crate::tables;
 use anyhow::{bail, Result};
@@ -40,20 +40,38 @@ pub fn dot_tables(db_file_path: &str) -> Result<Vec<String>, DotCmdError> {
     Ok(table_names)
 }
 
-/// Returns the page size of a SQLite database.
-pub(crate) fn page_size(db_file_path: &str) -> Result<u16> {
+/// Returns the page size in bytes of a SQLite database.
+///
+/// The size of a page is a power of two between 512 and 65536 inclusive.
+///
+/// The page size for a database file is determined by the 2-byte integer located at
+/// an offset of 16 bytes from the beginning of the database file.
+///
+/// The database page size must be a power of two between 512 and 32768 inclusive,
+/// or the value 1 representing a page size of 65536.
+///
+/// The value 65536 will not fit in a two-byte integer, so to specify a 65536-byte page size,
+/// the value at offset 16 is 0x00 0x01.
+///
+/// https://www.sqlite.org/fileformat.html#page_size
+pub(crate) fn page_size(db_file_path: &str) -> Result<u32> {
     let mut db_file = File::open(db_file_path)?;
-    let mut header = HEADER;
+    let mut header = DB_HEADER;
     db_file.read_exact(&mut header)?;
 
     // The page size is stored at the 16th byte offset in database header, using 2 bytes in big-endian order.
-    Ok(u16::from_be_bytes([header[16], header[17]]))
+    let mut page_size = u16::from_be_bytes([header[16], header[17]]) as u32;
+    if page_size == 1 {
+        page_size = 65536;
+    }
+
+    Ok(page_size)
 }
 
 /// Returns the number of pages in a SQLite database.
 fn num_pages(db_file_path: &str) -> Result<u32> {
     let mut db_file = File::open(db_file_path)?;
-    let mut header = HEADER;
+    let mut header = DB_HEADER;
     db_file.read_exact(&mut header)?;
 
     // Number of pages is stored at the 28th byte offset in database header, using 4 bytes in big-endian order.
@@ -83,7 +101,7 @@ fn num_pages(db_file_path: &str) -> Result<u32> {
 /// The text encoding is stored at the 56th byte offset in database header, using 4 bytes in big-endian order.
 pub(crate) fn text_encoding(db_file_path: &str) -> Result<String> {
     let mut db_file = File::open(db_file_path)?;
-    let mut header = HEADER;
+    let mut header = DB_HEADER;
     db_file.read_exact(&mut header)?;
 
     let enc = u32::from_be_bytes([header[56], header[57], header[58], header[59]]);
