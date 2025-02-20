@@ -65,18 +65,19 @@ pub(crate) fn serial_type_to_content_size(
 ///
 /// Takes a varint, `n`.
 ///
-/// Returns content of a record format serial type, wrapped in [`SerialTypeValue`].
+/// Returns content of a record format serial type, wrapped in [`SerialTypeValue`]
+/// as well as the number of bytes read.
 ///
 /// See [2.1. Record Format](https://www.sqlite.org/fileformat.html#record_format).
 ///
 /// # Returns
 ///
-/// Returns the contents of a record format serial type.
+/// Returns a 2-tuple of (contents of a record format serial type, the number of bytes read).
 pub(crate) fn get_serial_type_to_content(
     page: &Page,
     offset: &mut u16,
     n: VarintType,
-) -> anyhow::Result<SerialTypeValue> {
+) -> anyhow::Result<(SerialTypeValue, u16)> {
     let cont = &page.contents[*offset as usize..];
 
     let (val, read) = match n {
@@ -134,7 +135,7 @@ pub(crate) fn get_serial_type_to_content(
 
     *offset += read;
 
-    Ok(val)
+    Ok((val, read))
 }
 
 #[allow(unused)]
@@ -348,8 +349,9 @@ mod tests {
         let mut offset = 0x20; // byte 0x00
         let n: VarintType = 0;
         let result = get_serial_type_to_content(&page, &mut offset, n).unwrap();
-        assert_eq!(expected, result);
+        assert_eq!(expected, result.0);
         assert_eq!(0x20, offset);
+        assert_eq!(0, result.1);
     }
 
     #[test]
@@ -375,8 +377,9 @@ mod tests {
         let mut offset = (0x2ff3 - 2 * page_size) as u16; // byte 0x06
         let n: VarintType = 1;
         let result = get_serial_type_to_content(&page, &mut offset, n).unwrap();
-        assert_eq!(expected, result);
+        assert_eq!(expected, result.0);
         assert_eq!((0x2ff3 - 2 * page_size + 1) as u16, offset);
+        assert_eq!(1, result.1);
     }
 
     #[test]
