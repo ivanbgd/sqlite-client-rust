@@ -323,7 +323,6 @@ fn select_columns_in_order_rec(
 /// of the entire database, but it should be a root page of a table.
 ///
 /// Table interior pages don't store data. Their cells store pointers and don't count toward data rows.
-#[allow(clippy::too_many_arguments)]
 fn select_columns_in_order_rec_where(
     db_file: &mut File,
     page_size: u32,
@@ -709,13 +708,13 @@ fn get_columns_data_for_all_rows_on_table_leaf_page(
                 column_offset += column_content_size;
             }
             let mut offset = header_start + header_size as u16 + column_offset as u16;
-            let old_offset = offset;
             // eprintln!("offset = 0x{offset:04x}");
+            let old_offset = offset;
             let column_contents =
                 match get_serial_type_to_content(page, &mut offset, column_serial_type)? {
-                    SerialTypeValue::Null(_) => "".to_string(),
-                    SerialTypeValue::Text(column_contents) => column_contents,
-                    SerialTypeValue::Int8(column_contents) => column_contents.to_string(),
+                    (SerialTypeValue::Null(_), _read) => "".to_string(),
+                    (SerialTypeValue::Text(column_contents), _read) => column_contents,
+                    (SerialTypeValue::Int8(column_contents), _read) => column_contents.to_string(),
                     stv => panic!(
                         "Got unexpected type for column '{column_name}': {stv:?}; read {} byte(s).",
                         offset - old_offset
@@ -793,12 +792,13 @@ fn get_columns_data_for_all_rows_on_table_leaf_page_where(
                 column_offset += column_content_size;
             }
             let mut offset = header_start + header_size as u16 + column_offset as u16;
-            let old_offset = offset;
             // eprintln!("offset = 0x{offset:04x}");
+            let old_offset = offset;
             let column_contents =
                 match get_serial_type_to_content(page, &mut offset, column_serial_type)? {
-                    SerialTypeValue::Text(column_contents) => column_contents,
-                    SerialTypeValue::Int8(column_contents) => column_contents.to_string(),
+                    (SerialTypeValue::Null(_), _read) => "".to_string(),
+                    (SerialTypeValue::Text(column_contents), _read) => column_contents,
+                    (SerialTypeValue::Int8(column_contents), _read) => column_contents.to_string(),
                     stv => panic!(
                         "Got unexpected type for column '{column_name}': {stv:?}; read {} byte(s).",
                         offset - old_offset
@@ -835,12 +835,13 @@ fn get_columns_data_for_all_rows_on_table_leaf_page_where(
             column_offset += column_content_size;
         }
         let mut offset = header_start + header_size as u16 + column_offset as u16;
+        // eprintln!("offset = 0x{offset:04x}");
         let old_offset = offset;
         let column_contents =
             match get_serial_type_to_content(page, &mut offset, column_serial_type)? {
-                SerialTypeValue::Null(_) => "".to_string(),
-                SerialTypeValue::Text(column_contents) => column_contents,
-                SerialTypeValue::Int8(column_contents) => column_contents.to_string(),
+                (SerialTypeValue::Null(_), _read) => "".to_string(),
+                (SerialTypeValue::Text(column_contents), _read) => column_contents,
+                (SerialTypeValue::Int8(column_contents), _read) => column_contents.to_string(),
                 stv => panic!(
                     "Got unexpected type for column '{where_col_name}': {stv:?}; read {} byte(s).",
                     offset - old_offset
@@ -900,104 +901,90 @@ mod tests {
     #[test]
     fn select_name_from_apples2() {
         let command = "   SeleCT    nAme   frOM   APPles   ";
-        let mut expected = vec![
+        let expected = vec![
             "Granny Smith".to_string(),
             "Fuji".to_string(),
             "Honeycrisp".to_string(),
             "Golden Delicious".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_name_from_apples3() {
         let command = "   SeleCT    nAme   frOM   APPles  ;   ";
-        let mut expected = vec![
+        let expected = vec![
             "Granny Smith".to_string(),
             "Fuji".to_string(),
             "Honeycrisp".to_string(),
             "Golden Delicious".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_name_from_apples4() {
         let command = "   SeleCT    \"nAme\"   frOM   APPles  ";
-        let mut expected = vec![
+        let expected = vec![
             "Granny Smith".to_string(),
             "Fuji".to_string(),
             "Honeycrisp".to_string(),
             "Golden Delicious".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_name_from_apples5() {
         let command = "   SeleCT    nAme   frOM   \"APPles\"  ;  ";
-        let mut expected = vec![
+        let expected = vec![
             "Granny Smith".to_string(),
             "Fuji".to_string(),
             "Honeycrisp".to_string(),
             "Golden Delicious".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_name_from_apples6() {
         let command = "   SeleCT    \"nAme\"   frOM   \"APPles\"   ";
-        let mut expected = vec![
+        let expected = vec![
             "Granny Smith".to_string(),
             "Fuji".to_string(),
             "Honeycrisp".to_string(),
             "Golden Delicious".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_name_from_apples_limit_003() {
         let command = "   SeleCT    \"nAme\"   frOM   \"APPles\"   LIMit   003  ;  ";
-        let mut expected = vec![
+        let expected = vec![
             "Granny Smith".to_string(),
             "Fuji".to_string(),
             "Honeycrisp".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_name_from_apples_limit_010() {
         let command = "   SeleCT    \"nAme\"   frOM   \"APPles\"   LIMit   010   ";
-        let mut expected = vec![
+        let expected = vec![
             "Granny Smith".to_string(),
             "Fuji".to_string(),
             "Honeycrisp".to_string(),
             "Golden Delicious".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
@@ -1022,42 +1009,36 @@ mod tests {
     #[test]
     fn select_color_from_apples() {
         let command = "   SeleCT    cOLor   frOM   APPles   ";
-        let mut expected = vec![
+        let expected = vec![
             "Light Green".to_string(),
             "Red".to_string(),
             "Blush Red".to_string(),
             "Yellow".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_name_from_sqlite_sequence() {
         let command = "   SeleCT    nAme   frOM   SQLite_Sequence  ;  ";
-        let mut expected = vec!["apples".to_string(), "oranges".to_string()];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let expected = vec!["apples".to_string(), "oranges".to_string()];
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_seq_from_sqlite_sequence() {
         let command = "   SeleCT    seQ   frOM   SQLite_Sequence  ;  ";
-        let mut expected = vec!["4".to_string(), "6".to_string()];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let expected = vec!["4".to_string(), "6".to_string()];
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_name_from_oranges() {
         let command = "select name from oranges";
-        let mut expected = vec![
+        let expected = vec![
             "Mandarin".to_string(),
             "Tangelo".to_string(),
             "Tangerine".to_string(),
@@ -1065,16 +1046,14 @@ mod tests {
             "Valencia Orange".to_string(),
             "Navel Orange".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_description_from_oranges() {
         let command = "select description from oranges";
-        let mut expected = vec![
+        let expected = vec![
             "great for snacking".to_string(),
             "sweet and tart".to_string(),
             "great for sweeter juice".to_string(),
@@ -1082,104 +1061,88 @@ mod tests {
             "best for juicing".to_string(),
             "sweet with slight bitterness".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_id_from_apples1() {
         let command = "   SeleCT    Id   frOM   APPles  ;   ";
-        let mut expected = (1..=4).map(|id| id.to_string()).collect::<Vec<String>>();
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let expected = (1..=4).map(|id| id.to_string()).collect::<Vec<String>>();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_id_from_apples2() {
         let command = "   SeleCT    Id   frOM   APPles   ";
-        let mut expected = (1..=4).map(|id| id.to_string()).collect::<Vec<String>>();
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let expected = (1..=4).map(|id| id.to_string()).collect::<Vec<String>>();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_name_color_from_apples() {
         let command = "   SeleCT    nAme, ColoR   frOM   APPles  ;   ";
-        let mut expected = vec![
+        let expected = vec![
             "Granny Smith|Light Green".to_string(),
             "Fuji|Red".to_string(),
             "Honeycrisp|Blush Red".to_string(),
             "Golden Delicious|Yellow".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_id_name_color_from_apples() {
         let command = "   SeleCT   Id  ,  nAme  ,  ColoR   frOM   APPles  ;   ";
-        let mut expected = vec![
+        let expected = vec![
             "1|Granny Smith|Light Green".to_string(),
             "2|Fuji|Red".to_string(),
             "3|Honeycrisp|Blush Red".to_string(),
             "4|Golden Delicious|Yellow".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_name_color_name_from_apples() {
         let command = "   SeleCT    nAme, ColoR,NaME   frOM   APPles  ";
-        let mut expected = vec![
+        let expected = vec![
             "Granny Smith|Light Green|Granny Smith".to_string(),
             "Fuji|Red|Fuji".to_string(),
             "Honeycrisp|Blush Red|Honeycrisp".to_string(),
             "Golden Delicious|Yellow|Golden Delicious".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_id_name_color_name_from_apples() {
         let command = "   SeleCT  iD  ,  nAme, ColoR,NaME   frOM   APPles     ";
-        let mut expected = vec![
+        let expected = vec![
             "1|Granny Smith|Light Green|Granny Smith".to_string(),
             "2|Fuji|Red|Fuji".to_string(),
             "3|Honeycrisp|Blush Red|Honeycrisp".to_string(),
             "4|Golden Delicious|Yellow|Golden Delicious".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_id_name_color_id_id_from_apples() {
         let command = "   SeleCT  iD  ,  nAme, ColoR,Id,iD   frOM   APPles     ";
-        let mut expected = vec![
+        let expected = vec![
             "1|Granny Smith|Light Green|1|1".to_string(),
             "2|Fuji|Red|2|2".to_string(),
             "3|Honeycrisp|Blush Red|3|3".to_string(),
             "4|Golden Delicious|Yellow|4|4".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
@@ -1195,10 +1158,8 @@ mod tests {
     #[test]
     fn select_name_seq_seq_from_sqlite_sequence() {
         let command = "   SeleCT    nAme,sEq   ,   SeQ   frOM   SQLite_Sequence  ;  ";
-        let mut expected = vec!["apples|4|4".to_string(), "oranges|6|6".to_string()];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let expected = vec!["apples|4|4".to_string(), "oranges|6|6".to_string()];
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
@@ -1206,20 +1167,18 @@ mod tests {
     fn select_name_name_name_seq_seq_seq_name_name_name_seq_seq_seq_from_sqlite_sequence() {
         let command =
             "select name,name,name,seq,seq,seq,name,name,name,seq,seq,seq from sqlite_sequence";
-        let mut expected = vec![
+        let expected = vec![
             "apples|apples|apples|4|4|4|apples|apples|apples|4|4|4".to_string(),
             "oranges|oranges|oranges|6|6|6|oranges|oranges|oranges|6|6|6".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_name_description_from_oranges() {
         let command = "   SeleCT    nAme  ,  descRiption   frOM   orangeS   ";
-        let mut expected = vec![
+        let expected = vec![
             "Mandarin|great for snacking".to_string(),
             "Tangelo|sweet and tart".to_string(),
             "Tangerine|great for sweeter juice".to_string(),
@@ -1227,16 +1186,14 @@ mod tests {
             "Valencia Orange|best for juicing".to_string(),
             "Navel Orange|sweet with slight bitterness".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_name_name_name_from_oranges() {
         let command = "   SeleCT    nAme  ,  namE  ,  Name  frOM   orangeS  ;  ";
-        let mut expected = vec![
+        let expected = vec![
             "Mandarin|Mandarin|Mandarin".to_string(),
             "Tangelo|Tangelo|Tangelo".to_string(),
             "Tangerine|Tangerine|Tangerine".to_string(),
@@ -1244,9 +1201,7 @@ mod tests {
             "Valencia Orange|Valencia Orange|Valencia Orange".to_string(),
             "Navel Orange|Navel Orange|Navel Orange".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
@@ -1261,14 +1216,12 @@ mod tests {
     #[test]
     fn select_id_name_description_from_oranges_limit_3() {
         let command = "   SeleCT   Id  ,  nAme  ,  descRiption   frOM   orangeS  liMit   3  ;  ";
-        let mut expected = vec![
+        let expected = vec![
             "1|Mandarin|great for snacking".to_string(),
             "2|Tangelo|sweet and tart".to_string(),
             "3|Tangerine|great for sweeter juice".to_string(),
         ];
-        expected.sort();
-        let mut result = select("sample.db", command).unwrap();
-        result.sort();
+        let result = select("sample.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
@@ -1405,7 +1358,7 @@ mod tests {
     #[test]
     fn select_id_name_from_superheroes_where_eye_color_pink_eyes() {
         let command = "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes'";
-        let mut expected = vec![
+        let expected = vec![
             "297|Stealth (New Earth)".to_string(),
             "790|Tobias Whale (New Earth)".to_string(),
             "1085|Felicity (New Earth)".to_string(),
@@ -1413,23 +1366,19 @@ mod tests {
             "3289|Angora Lapin (New Earth)".to_string(),
             "3913|Matris Ater Clementia (New Earth)".to_string(),
         ];
-        expected.sort();
-        let mut result = select("test_dbs/superheroes.db", command).unwrap();
-        result.sort();
+        let result = select("test_dbs/superheroes.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
     #[test]
     fn select_id_name_from_superheroes_where_eye_color_pink_eyes_limit_3() {
         let command = "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes' LIMIT 3";
-        let mut expected = vec![
+        let expected = vec![
             "297|Stealth (New Earth)".to_string(),
             "790|Tobias Whale (New Earth)".to_string(),
             "1085|Felicity (New Earth)".to_string(),
         ];
-        expected.sort();
-        let mut result = select("test_dbs/superheroes.db", command).unwrap();
-        result.sort();
+        let result = select("test_dbs/superheroes.db", command).unwrap();
         assert_eq!(expected, result);
     }
 
@@ -1439,5 +1388,50 @@ mod tests {
         let expected = 55991.to_string();
         let result = &select("test_dbs/companies.db", command).unwrap()[0];
         assert_eq!(expected, *result);
+    }
+
+    #[test]
+    fn select_id_from_companies() {
+        let command = "SELECT id FROM companies";
+        let expected: Vec<String> = (1u16..=55991).map(|n| n.to_string()).collect::<Vec<_>>();
+        let result = select("test_dbs/companies.db", command).unwrap();
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn select_id_name_from_companies_where_country_eritrea() {
+        let command = "SELECT id, name FROM companies WHERE country = 'eritrea'";
+        let expected = vec![
+            "121311|unilink s.c.".to_string(),
+            "2102438|orange asmara it solutions".to_string(),
+            "5729848|zara mining share company".to_string(),
+            "6634629|asmara rental".to_string(),
+        ];
+        let result = select("test_dbs/companies.db", command).unwrap();
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn select_id_name_from_companies_where_country_eritrea_limit_3() {
+        let command = "SELECT id, name FROM companies WHERE country = 'eritrea' LIMIT 3";
+        let expected = vec![
+            "121311|unilink s.c.".to_string(),
+            "2102438|orange asmara it solutions".to_string(),
+            "5729848|zara mining share company".to_string(),
+        ];
+        let result = select("test_dbs/companies.db", command).unwrap();
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn select_id_name_from_companies_limit_3() {
+        let command = "SELECT id, name FROM companies LIMIT 3";
+        let expected = vec![
+            "159|global computer services llc".to_string(),
+            "168|noble foods co".to_string(),
+            "193|ipf softwares".to_string(),
+        ];
+        let result = select("test_dbs/companies.db", command).unwrap();
+        assert_eq!(expected, result);
     }
 }
