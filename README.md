@@ -107,6 +107,14 @@ $ ./your_program.sh sample.db .tables
 apples oranges
 ```
 
+- To emulate `$ sqlite3 companies.db .index` or `$ sqlite3 companies.db .indexes`:
+
+```shell
+$ ./your_program.sh companies.db .index
+$ ./your_program.sh companies.db .indexes
+idx_companies_country
+```
+
 ## SQL Commands
 
 ### Count number of rows in a table
@@ -182,3 +190,29 @@ $ ./your_program.sh superheroes.db "SELECT id, name FROM superheroes WHERE eye_c
 3289|Angora Lapin (New Earth)
 3913|Matris Ater Clementia (New Earth)
 ```
+
+### Indexes
+
+Indexes are also supported.
+
+Rather than reading all rows in a table and then filtering in-memory,
+we use an index to perform a more intelligent search.
+
+To test whether our implementation actually uses an index, their tester uses a database that is ~1GB in size
+and expects our program to return query results in less than 3 seconds.
+
+The test database contains a `companies` table with an index named `idx_companies_country` on the `country` column.
+
+We can download a small version of the `companies` database to test locally.
+
+```shell
+$ ./your_program.sh companies.db "SELECT id, name FROM companies WHERE country = 'eritrea'"
+121311|unilink s.c.
+2102438|orange asmara it solutions
+5729848|zara mining share company
+6634629|asmara rental
+```
+
+We can assume that all queries run by the tester will include `country` in the `WHERE` clause,
+so they can be served by the index.
+The tester will run multiple randomized queries and expect all of them to return results in under 3 seconds.

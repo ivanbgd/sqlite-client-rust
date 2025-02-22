@@ -14,7 +14,6 @@ use crate::varint::get_varint;
 use anyhow::Result;
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 use std::iter::zip;
 
 /// SQL `SELECT` command
@@ -79,11 +78,11 @@ fn select_count_rows_in_table(db_file_path: &str, table_name: &str) -> Result<u6
 
     if tables_meta.0.contains_key(table_name) {
         // We've found the requested table, `table_name`.
+        let table = &tables_meta.0[table_name];
+        // Now we need to jump to its pages and read the requested data. We start with its root page.
+        let page_num = table.rootpage;
         let page_size = dot_cmd::page_size(db_file_path)?;
         let mut db_file = File::open(db_file_path)?;
-        let table = &tables_meta.0[table_name];
-        // Now we need to jump to its pages and read the requested data.
-        let page_num = table.rootpage;
         let page = Page::new(&mut db_file, page_size, page_num)?;
         let num_rows = count_rows_in_order_rec(&mut db_file, page_size, page)?;
         Ok(num_rows)
@@ -106,38 +105,62 @@ fn select_count_rows_in_table(db_file_path: &str, table_name: &str) -> Result<u6
 fn count_rows_in_order_rec(db_file: &mut File, page_size: u32, page: Page) -> Result<u64> {
     let mut num_rows = 0u64;
 
-    let page_start = (page.page_num - 1) * page_size;
+    let page_start = (page.page_num - 1) * page_size; // todo comment-out
     let page_header = page.get_header();
     let page_type = page_header.page_type;
+    let cont = &page.contents;
+    assert_eq!(
+        page_header.num_cells as usize,
+        page.get_cell_ptr_array().len()
+    );
 
     // The format of a cell (B-tree Cell Format) depends on which kind of b-tree page the cell appears on (the current page).
     match page_type {
-        PageType::LeafTable => {
+        PageType::TableLeaf => {
+            eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells); // todo comment-out
             return Ok(page_header.num_cells as u64);
         }
-        PageType::InteriorTable => {
+        PageType::TableInterior => {
+            eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells); // todo comment-out
             for cell_ptr in page.get_cell_ptr_array() {
                 // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
-                let _pos = db_file.seek(SeekFrom::Start(page_start as u64 + cell_ptr as u64))?;
                 // Cell contains: (Page number of left child, Rowid) as (u32, varint).
-                let mut buf = [0u8; 4];
-                db_file.read_exact(&mut buf)?;
-                let page_num = u32::from_be_bytes(buf);
+                let page_num = u32::from_be_bytes(cont[cell_ptr as usize..][..4].try_into()?);
                 let left_child = Page::new(db_file, page_size, page_num)?;
                 num_rows += count_rows_in_order_rec(db_file, page_size, left_child)?;
             }
+            // Visit the rightmost child.
+            eprintln!("R {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells); // todo comment-out
+            let page_num = page_header
+                .rightmost_ptr
+                .expect("Expected PageType::TableInterior.");
+            // Rightmost pointer is page number of the rightmost child.
+            let right_child = Page::new(db_file, page_size, page_num)?;
+            num_rows += count_rows_in_order_rec(db_file, page_size, right_child)?;
         }
-        // TODO: Add index types!
-        other => panic!("Page type {other:?} encountered where it shouldn't be!"),
+        PageType::IndexLeaf => {
+            eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells); // todo comment-out
+            return Ok(page_header.num_cells as u64);
+        }
+        PageType::IndexInterior => {
+            eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells); // todo comment-out
+            for cell_ptr in page.get_cell_ptr_array() {
+                // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
+                // Cell contains: (Page number of left child, Number of bytes of payload, Payload, ...) as (u32, varint, byte array, ...).
+                let page_num = u32::from_be_bytes(cont[cell_ptr as usize..][..4].try_into()?);
+                let left_child = Page::new(db_file, page_size, page_num)?;
+                num_rows += count_rows_in_order_rec(db_file, page_size, left_child)? + 1;
+            }
+            // Visit the rightmost child.
+            eprintln!("R {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells); // todo comment-out
+            let page_num = page_header
+                .rightmost_ptr
+                .expect("Expected PageType::IndexInterior.");
+            // Rightmost pointer is page number of the rightmost child.
+            let right_child = Page::new(db_file, page_size, page_num)?;
+            num_rows += count_rows_in_order_rec(db_file, page_size, right_child)?;
+        }
     }
-    // Visit the rightmost child.
-    if page_type == PageType::InteriorTable {
-        let page_num = page_header.rightmost_ptr.expect("Expected interior table.");
-        // Rightmost pointer is page number of the rightmost child.
-        let right_child = Page::new(db_file, page_size, page_num)?;
-        num_rows += count_rows_in_order_rec(db_file, page_size, right_child)?;
-    }
-    // TODO: Add interior index type?!
 
     Ok(num_rows)
 }
@@ -184,6 +207,7 @@ fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<S
     };
 
     let tables_meta = get_tables_meta(db_file_path)?;
+    eprintln!("tables_meta: {tables_meta:#?}"); // todo comment-out
 
     if !tables_meta.0.contains_key(table_name) {
         // In case a table with the given name, `table_name`, does not exist in the database, return that error.
@@ -206,7 +230,7 @@ fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<S
     // Generally, we don't need two functions for either functionality.
     match where_args {
         None => {
-            let (desired_columns, num_all_cols) = column_order(column_names, table_name, table)?;
+            let (desired_columns, num_all_cols) = column_order(column_names, table)?;
 
             select_columns_in_order_rec(
                 db_file,
@@ -266,7 +290,7 @@ fn select_columns_in_order_rec(
 
     // The format of a cell (B-tree Cell Format) depends on which kind of b-tree page the cell appears on (the current page).
     match page_type {
-        PageType::LeafTable => {
+        PageType::TableLeaf => {
             get_columns_data_for_all_rows_on_table_leaf_page(
                 &page,
                 num_all_cols,
@@ -274,7 +298,7 @@ fn select_columns_in_order_rec(
                 result,
             )?;
         }
-        PageType::InteriorTable => {
+        PageType::TableInterior => {
             for cell_ptr in page.get_cell_ptr_array() {
                 // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
                 let page_num = &page.contents[cell_ptr as usize..][..4];
@@ -290,25 +314,24 @@ fn select_columns_in_order_rec(
                     result,
                 )?;
             }
+            // Visit the rightmost child.
+            if page_type == PageType::TableInterior {
+                let page_num = page_header.rightmost_ptr.expect("Expected interior table.");
+                // Rightmost pointer is page number of the rightmost child.
+                let right_child = Page::new(db_file, page_size, page_num)?;
+                select_columns_in_order_rec(
+                    db_file,
+                    page_size,
+                    right_child,
+                    num_all_cols,
+                    desired_columns,
+                    result,
+                )?;
+            }
         }
-        // TODO: Add index types!
+        // TODO: Add index types?! They should map to table types.
         other => panic!("Page type {other:?} encountered where it shouldn't be!"),
     }
-    // Visit the rightmost child.
-    if page_type == PageType::InteriorTable {
-        let page_num = page_header.rightmost_ptr.expect("Expected interior table.");
-        // Rightmost pointer is page number of the rightmost child.
-        let right_child = Page::new(db_file, page_size, page_num)?;
-        select_columns_in_order_rec(
-            db_file,
-            page_size,
-            right_child,
-            num_all_cols,
-            desired_columns,
-            result,
-        )?;
-    }
-    // TODO: Add interior index type?!
 
     Ok(())
 }
@@ -337,7 +360,7 @@ fn select_columns_in_order_rec_where(
 
     // The format of a cell (B-tree Cell Format) depends on which kind of b-tree page the cell appears on (the current page).
     match page_type {
-        PageType::LeafTable => {
+        PageType::TableLeaf => {
             get_columns_data_for_all_rows_on_table_leaf_page_where(
                 &page,
                 num_all_cols,
@@ -346,7 +369,7 @@ fn select_columns_in_order_rec_where(
                 result,
             )?;
         }
-        PageType::InteriorTable => {
+        PageType::TableInterior => {
             for cell_ptr in page.get_cell_ptr_array() {
                 // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
                 let page_num = &page.contents[cell_ptr as usize..][..4];
@@ -363,26 +386,25 @@ fn select_columns_in_order_rec_where(
                     result,
                 )?;
             }
+            // Visit the rightmost child.
+            if page_type == PageType::TableInterior {
+                let page_num = page_header.rightmost_ptr.expect("Expected interior table.");
+                // Rightmost pointer is page number of the rightmost child.
+                let right_child = Page::new(db_file, page_size, page_num)?;
+                select_columns_in_order_rec_where(
+                    db_file,
+                    page_size,
+                    right_child,
+                    num_all_cols,
+                    desired_columns,
+                    where_triple,
+                    result,
+                )?;
+            }
         }
-        // TODO: Add index types!
+        // TODO: Add index types?! They should map to table types.
         other => panic!("Page type {other:?} encountered where it shouldn't be!"),
     }
-    // Visit the rightmost child.
-    if page_type == PageType::InteriorTable {
-        let page_num = page_header.rightmost_ptr.expect("Expected interior table.");
-        // Rightmost pointer is page number of the rightmost child.
-        let right_child = Page::new(db_file, page_size, page_num)?;
-        select_columns_in_order_rec_where(
-            db_file,
-            page_size,
-            right_child,
-            num_all_cols,
-            desired_columns,
-            where_triple,
-            result,
-        )?;
-    }
-    // TODO: Add interior index type?!
 
     Ok(())
 }
@@ -416,22 +438,139 @@ fn get_where_args(command_rest: &str) -> Result<Option<(&str, &str)>> {
 /// Concretely, returns a tuple of: (a vector of desired columns, the number of all columns in the table).
 ///
 /// A desired column is a tuple itself which comprises a column name and its ordinal.
-fn column_order(
-    column_names: &str,
-    table_name: &str,
-    table: &SchemaTable,
-) -> Result<(Vec<(String, usize)>, usize)> {
+fn column_order(column_names: &str, table: &SchemaTable) -> Result<(Vec<(String, usize)>, usize)> {
     let desired_column_names = column_names.trim().to_lowercase();
     let desired_column_names = desired_column_names
         .split(',')
         .map(|col| col.trim().trim_matches('"'));
     let desired_column_names = desired_column_names.collect::<Vec<_>>();
 
-    let num_all_cols;
+    // let num_all_cols; // todo rem
     let mut columns_found = Vec::with_capacity(desired_column_names.len());
     let mut column_ordinals = Vec::with_capacity(desired_column_names.len());
-    let mut sql = table.sql.as_str();
 
+    eprintln!("table: {table:#?}"); // todo comment-out
+    let table_type = table.tbl_type.to_lowercase();
+    let table_type = table_type.as_str();
+    let table_name = &table.tbl_name;
+    let index_name = &table.name;
+    eprintln!("table_name = {table_name}, index_name = {index_name}"); // todo rem
+
+    if table_type == "index" {}
+
+    let sql = table.sql.to_lowercase();
+    let mut sql = sql.trim();
+    eprintln!("sql 1 = {sql}"); // todo rem
+
+    // todo rem
+    // sql = sql
+    //     .strip_prefix(&format!("create table {table_name}"))
+    //     .unwrap_or(sql);
+    // sql = sql
+    //     .strip_prefix(&format!("create index {index_name}"))
+    //     .unwrap_or_else(|| {
+    //         panic!(
+    //             "Expected table type 'table' or 'index'; got '{}'.",
+    //             table.tbl_type
+    //         )
+    //     });
+    // sql = sql.trim().strip_prefix('(').unwrap_or(sql).trim();
+
+    match table_type {
+        "table" => {
+            // TODO: Turn into a function.
+            sql = sql
+                .strip_prefix(&format!("create table {table_name}"))
+                .unwrap_or(sql)
+                .trim();
+            sql = sql
+                .strip_prefix(&format!("create table \"{table_name}\""))
+                .unwrap_or(sql)
+                .trim();
+            sql = sql.strip_prefix('(').unwrap_or(sql).trim();
+            eprintln!("sql 2 = {sql}"); // todo rem
+            sql = sql.strip_suffix(')').unwrap_or(sql).trim();
+        }
+        "index" => {
+            // TODO: Turn into a function.
+            sql = sql
+                .strip_prefix(&format!("create index {index_name}"))
+                .unwrap_or(sql)
+                .trim();
+            sql = sql
+                .strip_prefix(&format!("create index \"{index_name}\""))
+                .unwrap_or(sql)
+                .trim();
+            sql = sql.strip_prefix('(').unwrap_or(sql).trim();
+            sql = sql
+                .strip_prefix(&format!("on {table_name}"))
+                .unwrap_or(sql)
+                .trim();
+            sql = sql.strip_prefix('(').unwrap_or(sql).trim();
+            sql = sql.strip_suffix(')').unwrap_or(sql).trim();
+            eprintln!("sql 3 = {sql}"); // todo rem
+            sql = sql.strip_suffix(')').unwrap_or(sql).trim();
+        }
+        other => panic!("Expected table type 'table' or 'index'; got '{other}'."),
+    }
+
+    eprintln!("sql 4 = {sql}"); // todo rem
+
+    // TODO: In case of index, we have to process the corresponding indexed table, and not the index itself!
+
+    // TODO: This is for tables, not indexes?!
+    // The outer loop is over columns that a user wants.
+    for &column_name in &desired_column_names {
+        // The middle loop is over all lines that are stored in the "sqlite_schema" table's "sql" column.
+        for (mut column_ordinal, mut line) in sql.lines().enumerate() {
+            line = line.trim().trim_matches(',').trim();
+            let cols = line.split(',');
+            // let cols = cols.map(|col| col.trim()); // todo rem
+            // The inner loop is over all columns that are stored on the line (be it one or more columns per line).
+            for col in cols {
+                let mut words = col.split_whitespace();
+                if words
+                    .next()
+                    .expect("Expected a column name.")
+                    .to_lowercase()
+                    == column_name
+                {
+                    columns_found.push(column_name);
+                    column_ordinals.push(column_ordinal);
+                    eprintln!("column_name = {column_name}, column_ordinal = {column_ordinal}");
+                    // todo rem
+                }
+                column_ordinal += 1;
+            }
+        }
+    }
+
+    if table_type == "index" {
+        // TODO! There's nothing to do?!
+        // Find tbl_name's rootpage in sqlite_schema table. I need to jump to the indexed table somehow.
+        // Currently, I only visit index pages and no table pages!
+    }
+
+    let cols = sql
+        .lines()
+        .flat_map(|line| line.split(','))
+        .filter(|elt| !elt.is_empty())
+        .collect::<Vec<_>>();
+    eprintln!("{:?}", cols); // todo rem
+    let num_all_cols = cols.len();
+    // todo rem
+    // let columns = sql
+    //     .split(',')
+    //     .map(|col| col.trim().trim_matches('"'))
+    //     .collect::<Vec<_>>();
+    // num_all_cols = columns.len();
+    // num_all_cols += sql.split(',').collect::<Vec<_>>().len();
+    eprintln!("num_all_cols = {num_all_cols}"); // todo rem
+    eprintln!("columns_found = {columns_found:?}"); // todo rem
+    eprintln!("column_ordinals = {column_ordinals:?}"); // todo rem
+
+    ////////////////////////////////////////////////////////////////////////
+    /*
     sql = match sql.strip_suffix("\n)") {
         Some(sql) => sql,
         None => sql.strip_suffix(')').expect("strip suffix ')'"),
@@ -490,6 +629,8 @@ fn column_order(
             }
         }
     };
+     */
+    ////////////////////////////////////////////////////////////////////////
 
     let requested_cols: HashSet<&&str> = HashSet::from_iter(&desired_column_names);
     let found_cols: HashSet<&&str> = HashSet::from_iter(&columns_found);
@@ -509,6 +650,8 @@ fn column_order(
         column_ordinals,
     )
     .collect();
+
+    eprintln!("desired_columns = {desired_columns:?}, num_all_cols = {num_all_cols}"); // todo rem
 
     Ok((desired_columns, num_all_cols))
 }
@@ -1391,9 +1534,11 @@ mod tests {
     }
 
     #[test]
-    fn select_id_from_companies() {
-        let command = "SELECT id FROM companies";
-        let expected: Vec<String> = (1u16..=55991).map(|n| n.to_string()).collect::<Vec<_>>();
+    fn select_id_from_companies_limit_10() {
+        let command = "SELECT id FROM companies LIMIT 10";
+        let expected: Vec<String> = [159, 168, 193, 238, 654, 673, 782, 931, 966, 1247]
+            .map(|n| n.to_string())
+            .to_vec();
         let result = select("test_dbs/companies.db", command).unwrap();
         assert_eq!(expected, result);
     }

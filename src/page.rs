@@ -1,6 +1,17 @@
 //! # Page
 //!
 //! [1.6. B-tree Pages](https://www.sqlite.org/fileformat.html#b_tree_pages)
+//!
+//! A b-tree page is either a table b-tree page or an index b-tree page.
+//! All pages within each complete b-tree are of the same type: either table or index.
+//! There is one table b-tree in the database file for each rowid table in the database schema,
+//! including system tables such as sqlite_schema.
+//! There is one index b-tree in the database file for each index in the schema,
+//! including implied indexes created by uniqueness constraints.
+//!
+//! Each entry in a table b-tree consists of a 64-bit signed integer key and up to 2147483647 bytes of arbitrary data.
+//! (The key of a table b-tree corresponds to the rowid of the SQL table that the b-tree implements.)
+//! Interior table b-trees hold only keys and pointers to children. All data is contained in the table b-tree leaves.
 
 use crate::constants::DB_HEADER;
 use anyhow::Result;
@@ -64,7 +75,7 @@ impl Page {
         let num_fragmented = cont[7];
 
         let mut rightmost_ptr = None;
-        if page_type == PageType::InteriorTable || page_type == PageType::InteriorIndex {
+        if page_type == PageType::TableInterior || page_type == PageType::IndexInterior {
             rightmost_ptr = Some(u32::from_be_bytes([cont[8], cont[9], cont[10], cont[11]]));
         }
 
@@ -118,10 +129,10 @@ impl Page {
         };
 
         let (page_type, page_header_len) = match page_type_byte.into() {
-            PageType::InteriorIndex => (PageType::InteriorIndex, 12),
-            PageType::InteriorTable => (PageType::InteriorTable, 12),
-            PageType::LeafIndex => (PageType::LeafIndex, 8),
-            PageType::LeafTable => (PageType::LeafTable, 8),
+            PageType::IndexInterior => (PageType::IndexInterior, 12),
+            PageType::TableInterior => (PageType::TableInterior, 12),
+            PageType::IndexLeaf => (PageType::IndexLeaf, 8),
+            PageType::TableLeaf => (PageType::TableLeaf, 8),
         };
 
         (page_type, page_header_len)
@@ -144,19 +155,19 @@ pub(crate) struct PageHeader {
 
 #[derive(Debug, PartialEq)]
 pub enum PageType {
-    InteriorIndex = 0x02,
-    InteriorTable = 0x05,
-    LeafIndex = 0x0a,
-    LeafTable = 0x0d,
+    IndexInterior = 0x02,
+    TableInterior = 0x05,
+    IndexLeaf = 0x0a,
+    TableLeaf = 0x0d,
 }
 
 impl From<u8> for PageType {
     fn from(value: u8) -> Self {
         match value {
-            0x02 => PageType::InteriorIndex,
-            0x05 => PageType::InteriorTable,
-            0x0a => PageType::LeafIndex,
-            0x0d => PageType::LeafTable,
+            0x02 => PageType::IndexInterior,
+            0x05 => PageType::TableInterior,
+            0x0a => PageType::IndexLeaf,
+            0x0d => PageType::TableLeaf,
             v => panic!("Wrong page type: {v}"),
         }
     }
@@ -174,7 +185,7 @@ mod tests {
         let mut db_file = File::open("sample.db").unwrap();
         let page = Page::new(&mut db_file, page_size, 1).unwrap();
         let page_header = page.get_header();
-        assert_eq!(PageType::LeafTable, page_header.page_type);
+        assert_eq!(PageType::TableLeaf, page_header.page_type);
         assert_eq!(0, page_header.freeblock_start);
         assert_eq!(3, page_header.num_cells);
         assert_eq!(0x0ec3, page_header.cell_content_start);
@@ -189,7 +200,7 @@ mod tests {
         let mut db_file = File::open("sample.db").unwrap();
         let page = Page::new(&mut db_file, page_size, 2).unwrap();
         let page_header = page.get_header();
-        assert_eq!(PageType::LeafTable, page_header.page_type);
+        assert_eq!(PageType::TableLeaf, page_header.page_type);
         assert_eq!(0, page_header.freeblock_start);
         assert_eq!(4, page_header.num_cells);
         assert_eq!(0x0fa1, page_header.cell_content_start);
@@ -204,7 +215,7 @@ mod tests {
         let mut db_file = File::open("test_dbs/superheroes.db").unwrap();
         let page = Page::new(&mut db_file, page_size, 1).unwrap();
         let page_header = page.get_header();
-        assert_eq!(PageType::LeafTable, page_header.page_type);
+        assert_eq!(PageType::TableLeaf, page_header.page_type);
         assert_eq!(0x0fc9, page_header.freeblock_start);
         assert_eq!(2, page_header.num_cells);
         assert_eq!(0x0e8e, page_header.cell_content_start);
@@ -219,7 +230,7 @@ mod tests {
         let mut db_file = File::open("test_dbs/superheroes.db").unwrap();
         let page = Page::new(&mut db_file, page_size, 2).unwrap();
         let page_header = page.get_header();
-        assert_eq!(PageType::InteriorTable, page_header.page_type);
+        assert_eq!(PageType::TableInterior, page_header.page_type);
         assert_eq!(0, page_header.freeblock_start);
         assert_eq!(0x006c, page_header.num_cells);
         assert_eq!(0x0d7a, page_header.cell_content_start);

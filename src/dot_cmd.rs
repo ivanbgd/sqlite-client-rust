@@ -26,18 +26,34 @@ pub fn dot_dbinfo(db_file_path: &str) -> Result<()> {
 
 /// The `.tables` dot command.
 ///
-/// Prints the names of the user tables in a SQLite database.
+/// Prints the names of user tables in a SQLite database.
 pub fn dot_tables(db_file_path: &str) -> Result<Vec<String>, DotCmdError> {
-    let tbl_names = tables::get_tables_meta(db_file_path)?.get_tbl_names();
+    let objects = tables::get_tables_meta(db_file_path)?.get_objects();
     let mut table_names = vec![];
-    for tbl_name in tbl_names {
-        if tbl_name != *"sqlite_sequence" {
-            table_names.push(tbl_name);
+    for object in objects {
+        if object.tbl_type.to_lowercase() == "table" && object.name != *"sqlite_sequence" {
+            table_names.push(object.name);
         }
     }
     table_names.sort();
 
     Ok(table_names)
+}
+
+/// The `.index` or `.indexes` dot command.
+///
+/// Prints the names of indexes in a SQLite database.
+pub fn dot_indexes(db_file_path: &str) -> Result<Vec<String>, DotCmdError> {
+    let objects = tables::get_tables_meta(db_file_path)?.get_objects();
+    let mut index_names = vec![];
+    for object in objects {
+        if object.tbl_type.to_lowercase() == "index" {
+            index_names.push(object.name);
+        }
+    }
+    index_names.sort();
+
+    Ok(index_names)
 }
 
 /// Returns the page size in bytes of a SQLite database.

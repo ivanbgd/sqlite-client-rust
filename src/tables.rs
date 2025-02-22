@@ -1,4 +1,13 @@
 //! Tables and related functions
+//!
+//! [1.6. B-tree Pages](https://www.sqlite.org/fileformat.html#b_tree_pages)
+//!
+//! The b-tree corresponding to the sqlite_schema table is always a table b-tree and always has a root page of 1.
+//! The sqlite_schema table contains the root page number for every other table and index in the database file.
+//!
+//! Each entry in a table b-tree consists of a 64-bit signed integer key and up to 2147483647 bytes of arbitrary data.
+//! (The key of a table b-tree corresponds to the rowid of the SQL table that the b-tree implements.)
+//! Interior table b-trees hold only keys and pointers to children. All data is contained in the table b-tree leaves.
 
 use crate::constants::SCHEMA_TABLE_FIELD_LEN;
 use crate::dot_cmd;
@@ -22,16 +31,46 @@ use std::io::{Read, Seek, SeekFrom};
 pub(crate) struct TablesMeta(pub(crate) HashMap<String, SchemaTable>);
 
 impl TablesMeta {
-    pub(crate) fn get_tbl_names(self) -> Vec<String> {
-        let mut tbl_names = Vec::with_capacity(self.0.len());
-        for (tbl_name, _table) in self.0 {
-            tbl_names.push(tbl_name);
+    /// Returns database objects' (tables and indexes) metadata that are stored in the `sqlite_schema` table.
+    pub(crate) fn get_objects(self) -> Vec<SchemaTable> {
+        let mut objects = Vec::with_capacity(self.0.len());
+        for (_obj_name, object) in self.0 {
+            objects.push(object);
         }
-        tbl_names
+        objects
+    }
+
+    #[allow(unused)]
+    /// Returns names of database objects (tables and indexes).
+    ///
+    /// These are the `name` fields, not the `tbl_name` fields.
+    pub(crate) fn get_object_names(self) -> Vec<String> {
+        let mut obj_names = Vec::with_capacity(self.0.len());
+        for (obj_name, _obj) in self.0 {
+            obj_names.push(obj_name);
+        }
+        obj_names
     }
 }
 
+/// Every SQLite database contains a single "schema table" that stores the schema for that database.
+/// The schema for a database is a description of all of the other tables, indexes, triggers, and views that
+/// are contained within the database. The schema table looks like this:
+///
+///     CREATE TABLE sqlite_schema(
+///       type text,
+///       name text,
+///       tbl_name text,
+///       rootpage integer,
+///       sql text
+///     );
+///
+/// The sqlite_schema table contains one row for each table, index, view, and trigger (collectively "objects")
+/// in the schema, except there is no entry for the sqlite_schema table itself.
+///
 /// [The Schema Table](https://www.sqlite.org/schematab.html)
+///
+/// [2.6. Storage Of The SQL Database Schema](https://www.sqlite.org/fileformat2.html#ffschema)
 #[allow(unused)]
 #[derive(Debug)]
 pub(crate) struct SchemaTable {
@@ -43,13 +82,7 @@ pub(crate) struct SchemaTable {
 }
 
 impl SchemaTable {
-    pub(crate) fn new(
-        tbl_type: String,
-        name: String,
-        tbl_name: String,
-        rootpage: u32,
-        sql: String,
-    ) -> Self {
+    fn new(tbl_type: String, name: String, tbl_name: String, rootpage: u32, sql: String) -> Self {
         Self {
             tbl_type,
             name,
@@ -60,7 +93,12 @@ impl SchemaTable {
     }
 }
 
-/// Returns the tables metadata in a SQLite database.
+/// Returns the tables metadata in an SQLite database.
+///
+/// The metadata are stored and read from the `sqlite_schema` table.
+///
+/// The b-tree corresponding to the sqlite_schema table is always a table b-tree and always has a root page of 1.
+/// The sqlite_schema table contains the root page number for every other table and index in the database file.
 pub(crate) fn get_tables_meta(db_file_path: &str) -> Result<TablesMeta, DotCmdError> {
     let mut tables_meta = TablesMeta(HashMap::new());
 
@@ -102,11 +140,16 @@ fn traverse_btree(
     visit_fn: &VisitType,
     tables_meta: &mut TablesMeta,
 ) -> Result<()> {
-    in_order_rec(db_file, page_size, page, visit_fn, tables_meta)
+    in_order_rec_sqlite_schema(db_file, page_size, page, visit_fn, tables_meta)
 }
 
 /// Recursive implementation of in-order traversal for B-tree
-fn in_order_rec(
+///
+/// Used for traversing the sqlite_schema table B-tree.
+///
+/// The b-tree corresponding to the sqlite_schema table is always a table b-tree and always has a root page of 1.
+/// The sqlite_schema table contains the root page number for every other table and index in the database file.
+fn in_order_rec_sqlite_schema(
     db_file: &mut File,
     page_size: u32,
     page: Page,
@@ -118,29 +161,32 @@ fn in_order_rec(
 
     // The format of a cell (B-tree Cell Format) depends on which kind of b-tree page the cell appears on (the current page).
     match page_type {
-        PageType::LeafTable => {
+        PageType::TableLeaf => {
             for cell_ptr in page.get_cell_ptr_array() {
                 visit_fn(&page, cell_ptr, tables_meta)?;
             }
         }
-        PageType::InteriorTable => {
+        PageType::TableInterior => {
             for cell_ptr in page.get_cell_ptr_array() {
                 // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
                 let page_num = &page.contents[cell_ptr as usize..][..4];
                 // Cell contains: (Page number of left child, Rowid) as (u32, varint).
                 let page_num = u32::from_be_bytes(page_num.try_into()?);
                 let left_child = Page::new(db_file, page_size, page_num)?;
-                in_order_rec(db_file, page_size, left_child, visit_fn, tables_meta)?;
+                in_order_rec_sqlite_schema(db_file, page_size, left_child, visit_fn, tables_meta)?;
             }
         }
+        // The b-tree corresponding to the sqlite_schema table is always a table b-tree.
         other => panic!("Page type {other:?} encountered where it shouldn't be!"),
     }
     // Visit the rightmost child.
-    if page_type == PageType::InteriorTable {
-        let page_num = page_header.rightmost_ptr.expect("Expected interior table.");
+    if page_type == PageType::TableInterior {
+        let page_num = page_header
+            .rightmost_ptr
+            .expect("Expected table interior page type.");
         // Rightmost pointer is page number of the rightmost child.
         let right_child = Page::new(db_file, page_size, page_num)?;
-        in_order_rec(db_file, page_size, right_child, visit_fn, tables_meta)?;
+        in_order_rec_sqlite_schema(db_file, page_size, right_child, visit_fn, tables_meta)?;
     }
 
     Ok(())
@@ -227,7 +273,7 @@ fn parse_schema_table(page: &Page, mut offset: u16, tables_meta: &mut TablesMeta
 
     // Add schema for this table to the list.
     tables_meta.0.insert(
-        tbl_name.clone(),
+        name.clone(),
         SchemaTable::new(tbl_type, name, tbl_name, rootpage, sql),
     );
 
@@ -255,13 +301,13 @@ fn in_order_rec_from_file(
 
     // The format of a cell (B-tree Cell Format) depends on which kind of b-tree page the cell appears on (the current page).
     match page_type {
-        PageType::LeafTable => {
+        PageType::TableLeaf => {
             for cell_ptr in page.get_cell_ptr_array() {
                 let _pos = db_file.seek(SeekFrom::Start(page_start + cell_ptr as u64))?;
                 visit_fn(db_file, tables_meta)?;
             }
         }
-        PageType::InteriorTable => {
+        PageType::TableInterior => {
             for cell_ptr in page.get_cell_ptr_array() {
                 // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
                 let _pos = db_file.seek(SeekFrom::Start(page_start + cell_ptr as u64))?;
@@ -276,7 +322,7 @@ fn in_order_rec_from_file(
         other => panic!("Page type {other:?} encountered where it shouldn't be!"),
     }
     // Visit the rightmost child.
-    if page_type == PageType::InteriorTable {
+    if page_type == PageType::TableInterior {
         let page_num = page_header.rightmost_ptr.expect("Expected interior table.");
         // Rightmost pointer is page number of the rightmost child.
         let right_child = Page::new(db_file, page_size, page_num)?;
@@ -375,7 +421,7 @@ fn parse_schema_table_from_file(db_file: &mut File, tables_meta: &mut TablesMeta
 
     // Add schema for this table to the list.
     tables_meta.0.insert(
-        tbl_name.clone(),
+        name.clone(),
         SchemaTable::new(tbl_type, name, tbl_name, rootpage, sql),
     );
 

@@ -2,7 +2,7 @@
 
 use anyhow::{bail, Result};
 use codecrafters_sqlite::constants::SELECT_PATTERN;
-use codecrafters_sqlite::dot_cmd::{dot_dbinfo, dot_tables};
+use codecrafters_sqlite::dot_cmd::{dot_dbinfo, dot_indexes, dot_tables};
 use codecrafters_sqlite::sql::select;
 
 fn main() -> Result<()> {
@@ -32,6 +32,13 @@ fn main() -> Result<()> {
             }
             ".tables" => {
                 let names = dot_tables(db_file_path)?;
+                for name in names {
+                    print!("{name} ");
+                }
+                println!();
+            }
+            ".index" | ".indexes" => {
+                let names = dot_indexes(db_file_path)?;
                 for name in names {
                     print!("{name} ");
                 }
