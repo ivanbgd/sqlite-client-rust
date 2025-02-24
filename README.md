@@ -216,3 +216,12 @@ $ ./your_program.sh companies.db "SELECT id, name FROM companies WHERE country =
 We can assume that all queries run by the tester will include `country` in the `WHERE` clause,
 so they can be served by the index.
 The tester will run multiple randomized queries and expect all of them to return results in under 3 seconds.
+
+Since the table `superheroes` is smaller than `companies`, we can add an index to it and also work with it.
+
+```shell
+$ sqlite3 superheroes.db "CREATE INDEX idx_superheroes_eye_color on superheroes (eye_color)"
+
+$ ./your_program.sh superheroes.db "SELECT id, name FROM superheroes LIMIT 10"
+$ ./your_program.sh superheroes.db "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes'"
+```

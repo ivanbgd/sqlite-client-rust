@@ -105,7 +105,7 @@ fn select_count_rows_in_table(db_file_path: &str, table_name: &str) -> Result<u6
 fn count_rows_in_order_rec(db_file: &mut File, page_size: u32, page: Page) -> Result<u64> {
     let mut num_rows = 0u64;
 
-    let page_start = (page.page_num - 1) * page_size; // todo comment-out
+    // let page_start = (page.page_num - 1) * page_size;
     let page_header = page.get_header();
     let page_type = page_header.page_type;
     let cont = &page.contents;
@@ -114,14 +114,17 @@ fn count_rows_in_order_rec(db_file: &mut File, page_size: u32, page: Page) -> Re
         page.get_cell_ptr_array().len()
     );
 
+    // We are keeping the two index types below for completeness, but they don't occur here.
+    assert!(page_type.eq(&PageType::TableLeaf) || page_type.eq(&PageType::TableInterior));
+
     // The format of a cell (B-tree Cell Format) depends on which kind of b-tree page the cell appears on (the current page).
     match page_type {
         PageType::TableLeaf => {
-            eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells); // todo comment-out
+            // eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells);
             return Ok(page_header.num_cells as u64);
         }
         PageType::TableInterior => {
-            eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells); // todo comment-out
+            // eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells);
             for cell_ptr in page.get_cell_ptr_array() {
                 // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
                 // Cell contains: (Page number of left child, Rowid) as (u32, varint).
@@ -130,7 +133,7 @@ fn count_rows_in_order_rec(db_file: &mut File, page_size: u32, page: Page) -> Re
                 num_rows += count_rows_in_order_rec(db_file, page_size, left_child)?;
             }
             // Visit the rightmost child.
-            eprintln!("R {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells); // todo comment-out
+            // eprintln!("R {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells);
             let page_num = page_header
                 .rightmost_ptr
                 .expect("Expected PageType::TableInterior.");
@@ -139,11 +142,11 @@ fn count_rows_in_order_rec(db_file: &mut File, page_size: u32, page: Page) -> Re
             num_rows += count_rows_in_order_rec(db_file, page_size, right_child)?;
         }
         PageType::IndexLeaf => {
-            eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells); // todo comment-out
+            // eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells);
             return Ok(page_header.num_cells as u64);
         }
         PageType::IndexInterior => {
-            eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells); // todo comment-out
+            // eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells);
             for cell_ptr in page.get_cell_ptr_array() {
                 // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
                 // Cell contains: (Page number of left child, Number of bytes of payload, Payload, ...) as (u32, varint, byte array, ...).
@@ -152,7 +155,7 @@ fn count_rows_in_order_rec(db_file: &mut File, page_size: u32, page: Page) -> Re
                 num_rows += count_rows_in_order_rec(db_file, page_size, left_child)? + 1;
             }
             // Visit the rightmost child.
-            eprintln!("R {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells); // todo comment-out
+            // eprintln!("R {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells);
             let page_num = page_header
                 .rightmost_ptr
                 .expect("Expected PageType::IndexInterior.");
@@ -207,7 +210,11 @@ fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<S
     };
 
     let tables_meta = get_tables_meta(db_file_path)?;
-    eprintln!("tables_meta: {tables_meta:#?}"); // todo comment-out
+    // eprintln!("tables_meta: {tables_meta:#?}");
+
+    // TODO: See if there's an index in the DB. This makes more sense with the `WHERE` clause, but see if it makes some sense here, too.
+
+    // TODO: Search through the index and only in the end map to the table, to speed up the search.
 
     if !tables_meta.0.contains_key(table_name) {
         // In case a table with the given name, `table_name`, does not exist in the database, return that error.
@@ -243,7 +250,7 @@ fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<S
         }
         Some(where_args) => {
             let (desired_columns, num_all_cols, where_column) =
-                column_order_where(column_names, table_name, table, where_args.clone())?;
+                column_order_where(column_names, table, where_args.clone())?;
 
             let (where_col_name, where_col_value) = where_args;
             let (_where_col_name, where_col_ord) = where_column;
@@ -435,6 +442,9 @@ fn get_where_args(command_rest: &str) -> Result<Option<(&str, &str)>> {
 
 /// Returns the order of the requested columns by retrieving it from the "sqlite_schema" table's "sql" column.
 ///
+/// Supports working with both tables and indexes, but is generally meant for working with the "table" type,
+/// as desired columns are stored in tables, and not in their potential indexes.
+///
 /// Concretely, returns a tuple of: (a vector of desired columns, the number of all columns in the table).
 ///
 /// A desired column is a tuple itself which comprises a column name and its ordinal.
@@ -445,40 +455,23 @@ fn column_order(column_names: &str, table: &SchemaTable) -> Result<(Vec<(String,
         .map(|col| col.trim().trim_matches('"'));
     let desired_column_names = desired_column_names.collect::<Vec<_>>();
 
-    // let num_all_cols; // todo rem
     let mut columns_found = Vec::with_capacity(desired_column_names.len());
     let mut column_ordinals = Vec::with_capacity(desired_column_names.len());
 
-    eprintln!("table: {table:#?}"); // todo comment-out
+    // eprintln!("table: {table:#?}");
     let table_type = table.tbl_type.to_lowercase();
     let table_type = table_type.as_str();
     let table_name = &table.tbl_name;
     let index_name = &table.name;
-    eprintln!("table_name = {table_name}, index_name = {index_name}"); // todo rem
 
-    if table_type == "index" {}
+    // We are keeping the index type below for completeness, but it doesn't occur here.
+    assert_eq!("table", table_type);
 
     let sql = table.sql.to_lowercase();
     let mut sql = sql.trim();
-    eprintln!("sql 1 = {sql}"); // todo rem
-
-    // todo rem
-    // sql = sql
-    //     .strip_prefix(&format!("create table {table_name}"))
-    //     .unwrap_or(sql);
-    // sql = sql
-    //     .strip_prefix(&format!("create index {index_name}"))
-    //     .unwrap_or_else(|| {
-    //         panic!(
-    //             "Expected table type 'table' or 'index'; got '{}'.",
-    //             table.tbl_type
-    //         )
-    //     });
-    // sql = sql.trim().strip_prefix('(').unwrap_or(sql).trim();
 
     match table_type {
         "table" => {
-            // TODO: Turn into a function.
             sql = sql
                 .strip_prefix(&format!("create table {table_name}"))
                 .unwrap_or(sql)
@@ -488,11 +481,9 @@ fn column_order(column_names: &str, table: &SchemaTable) -> Result<(Vec<(String,
                 .unwrap_or(sql)
                 .trim();
             sql = sql.strip_prefix('(').unwrap_or(sql).trim();
-            eprintln!("sql 2 = {sql}"); // todo rem
             sql = sql.strip_suffix(')').unwrap_or(sql).trim();
         }
         "index" => {
-            // TODO: Turn into a function.
             sql = sql
                 .strip_prefix(&format!("create index {index_name}"))
                 .unwrap_or(sql)
@@ -508,24 +499,17 @@ fn column_order(column_names: &str, table: &SchemaTable) -> Result<(Vec<(String,
                 .trim();
             sql = sql.strip_prefix('(').unwrap_or(sql).trim();
             sql = sql.strip_suffix(')').unwrap_or(sql).trim();
-            eprintln!("sql 3 = {sql}"); // todo rem
             sql = sql.strip_suffix(')').unwrap_or(sql).trim();
         }
         other => panic!("Expected table type 'table' or 'index'; got '{other}'."),
     }
 
-    eprintln!("sql 4 = {sql}"); // todo rem
-
-    // TODO: In case of index, we have to process the corresponding indexed table, and not the index itself!
-
-    // TODO: This is for tables, not indexes?!
-    // The outer loop is over columns that a user wants.
+    // The outer loop is over columns that a user wants. This is primarily meant for the "table" type, not for "index".
     for &column_name in &desired_column_names {
         // The middle loop is over all lines that are stored in the "sqlite_schema" table's "sql" column.
         for (mut column_ordinal, mut line) in sql.lines().enumerate() {
             line = line.trim().trim_matches(',').trim();
             let cols = line.split(',');
-            // let cols = cols.map(|col| col.trim()); // todo rem
             // The inner loop is over all columns that are stored on the line (be it one or more columns per line).
             for col in cols {
                 let mut words = col.split_whitespace();
@@ -537,100 +521,17 @@ fn column_order(column_names: &str, table: &SchemaTable) -> Result<(Vec<(String,
                 {
                     columns_found.push(column_name);
                     column_ordinals.push(column_ordinal);
-                    eprintln!("column_name = {column_name}, column_ordinal = {column_ordinal}");
-                    // todo rem
                 }
                 column_ordinal += 1;
             }
         }
     }
 
-    if table_type == "index" {
-        // TODO! There's nothing to do?!
-        // Find tbl_name's rootpage in sqlite_schema table. I need to jump to the indexed table somehow.
-        // Currently, I only visit index pages and no table pages!
-    }
-
-    let cols = sql
+    let num_all_cols = sql
         .lines()
         .flat_map(|line| line.split(','))
         .filter(|elt| !elt.is_empty())
-        .collect::<Vec<_>>();
-    eprintln!("{:?}", cols); // todo rem
-    let num_all_cols = cols.len();
-    // todo rem
-    // let columns = sql
-    //     .split(',')
-    //     .map(|col| col.trim().trim_matches('"'))
-    //     .collect::<Vec<_>>();
-    // num_all_cols = columns.len();
-    // num_all_cols += sql.split(',').collect::<Vec<_>>().len();
-    eprintln!("num_all_cols = {num_all_cols}"); // todo rem
-    eprintln!("columns_found = {columns_found:?}"); // todo rem
-    eprintln!("column_ordinals = {column_ordinals:?}"); // todo rem
-
-    ////////////////////////////////////////////////////////////////////////
-    /*
-    sql = match sql.strip_suffix("\n)") {
-        Some(sql) => sql,
-        None => sql.strip_suffix(')').expect("strip suffix ')'"),
-    };
-
-    match sql.strip_prefix(format!("create table {}\n(\n", table_name).as_str()) {
-        Some(sql) => {
-            // The outer loop is over columns that a user wants.
-            for &column_name in &desired_column_names {
-                // The inner loop is over all lines that are stored in the "sqlite_schema" table's "sql" column.
-                for (column_ordinal, line) in sql.lines().enumerate() {
-                    // TODO: Fix this! This is incorrect in general case. Also consider `.trim_matches('"')` after `.trim()`, if needed. The sql column could have indexes, for example.
-                    if line.trim().to_lowercase().starts_with(column_name) {
-                        columns_found.push(column_name);
-                        column_ordinals.push(column_ordinal);
-                        break;
-                    }
-                }
-            }
-            num_all_cols = sql.lines().collect::<Vec<_>>().len();
-        }
-        None => {
-            sql = match sql.strip_prefix(format!("create table {}(", table_name).as_str()) {
-                Some(sql) => sql,
-                None => match sql.strip_prefix(format!("create table {} (", table_name).as_str()) {
-                    Some(sql) => sql,
-                    None => {
-                        match sql
-                            .strip_prefix(format!("create table \"{}\" (", table_name).as_str())
-                        {
-                            Some(sql) => sql,
-                            None => sql
-                                .strip_prefix(format!("create table \"{}\"(", table_name).as_str())
-                                .unwrap_or_else(|| panic!("strip prefix: sql = '{sql}'")),
-                        }
-                    }
-                },
-            };
-            let columns = sql
-                .split(',')
-                .map(|col| col.trim().trim_matches('"'))
-                .collect::<Vec<_>>();
-            num_all_cols = columns.len();
-
-            // The outer loop is over columns that a user wants.
-            for column_name in &desired_column_names {
-                // The inner loop is over all columns that exist in the table,
-                // whose names were fetched above from the "sqlite_schema" table's "sql" column.
-                for (column_ordinal, col) in columns.iter().enumerate() {
-                    if col.trim().starts_with(column_name) {
-                        columns_found.push(*column_name);
-                        column_ordinals.push(column_ordinal);
-                        break;
-                    }
-                }
-            }
-        }
-    };
-     */
-    ////////////////////////////////////////////////////////////////////////
+        .count();
 
     let requested_cols: HashSet<&&str> = HashSet::from_iter(&desired_column_names);
     let found_cols: HashSet<&&str> = HashSet::from_iter(&columns_found);
@@ -651,8 +552,6 @@ fn column_order(column_names: &str, table: &SchemaTable) -> Result<(Vec<(String,
     )
     .collect();
 
-    eprintln!("desired_columns = {desired_columns:?}, num_all_cols = {num_all_cols}"); // todo rem
-
     Ok((desired_columns, num_all_cols))
 }
 
@@ -664,7 +563,6 @@ fn column_order(column_names: &str, table: &SchemaTable) -> Result<(Vec<(String,
 /// A desired column and the WHERE column are tuples themselves which comprise a column name and its ordinal.
 fn column_order_where(
     column_names: &str,
-    table_name: &str,
     table: &SchemaTable,
     where_args: (String, &str),
 ) -> Result<(Vec<ColumnNameOrd>, usize, ColumnNameOrd)> {
@@ -677,86 +575,77 @@ fn column_order_where(
     let where_col_name = where_args.0.trim().to_lowercase();
     let mut where_col_ord = usize::MAX;
 
-    let num_all_cols;
     let mut columns_found = Vec::with_capacity(desired_column_names.len());
     let mut column_ordinals = Vec::with_capacity(desired_column_names.len());
-    let mut sql = table.sql.as_str();
 
-    sql = match sql.strip_suffix("\n)") {
-        Some(sql) => sql,
-        None => sql.strip_suffix(')').expect("strip suffix ')'"),
-    };
+    // eprintln!("table: {table:#?}");
+    let table_type = table.tbl_type.to_lowercase();
+    let table_type = table_type.as_str();
+    let table_name = &table.tbl_name;
 
-    match sql.strip_prefix(format!("create table {}\n(\n", table_name).as_str()) {
-        Some(sql) => {
-            // The outer loop is over columns that a user wants.
-            for &column_name in &desired_column_names {
-                // The inner loop is over all lines that are stored in the "sqlite_schema" table's "sql" column.
-                for (column_ordinal, line) in sql.lines().enumerate() {
-                    // TODO: Fix this! This is incorrect in general case. Also consider `.trim_matches('"')` after `.trim()`, if needed. The sql column could have indexes, for example.
-                    if line.trim().to_lowercase().starts_with(column_name) {
-                        columns_found.push(column_name);
-                        column_ordinals.push(column_ordinal);
-                        break;
-                    }
+    assert_eq!("table", table_type);
+
+    let sql = table.sql.to_lowercase();
+    let mut sql = sql.trim();
+
+    sql = sql
+        .strip_prefix(&format!("create table {table_name}"))
+        .unwrap_or(sql)
+        .trim();
+    sql = sql
+        .strip_prefix(&format!("create table \"{table_name}\""))
+        .unwrap_or(sql)
+        .trim();
+    sql = sql.strip_prefix('(').unwrap_or(sql).trim();
+    sql = sql.strip_suffix(')').unwrap_or(sql).trim();
+
+    // The outer loop is over columns that a user wants. This is primarily meant for the "table" type, not for "index".
+    for &column_name in &desired_column_names {
+        // The middle loop is over all lines that are stored in the "sqlite_schema" table's "sql" column.
+        for (mut column_ordinal, mut line) in sql.lines().enumerate() {
+            line = line.trim().trim_matches(',').trim();
+            let cols = line.split(',');
+            // The inner loop is over all columns that are stored on the line (be it one or more columns per line).
+            for col in cols {
+                let mut words = col.split_whitespace();
+                if words
+                    .next()
+                    .expect("Expected a column name.")
+                    .to_lowercase()
+                    == column_name
+                {
+                    columns_found.push(column_name);
+                    column_ordinals.push(column_ordinal);
                 }
-            }
-
-            // Also check for the WHERE column.
-            for (column_ordinal, line) in sql.lines().enumerate() {
-                if line.trim().to_lowercase().starts_with(&where_col_name) {
-                    where_col_ord = column_ordinal;
-                    break;
-                }
-            }
-
-            num_all_cols = sql.lines().collect::<Vec<_>>().len();
-        }
-        None => {
-            sql = match sql.strip_prefix(format!("create table {}(", table_name).as_str()) {
-                Some(sql) => sql,
-                None => match sql.strip_prefix(format!("create table {} (", table_name).as_str()) {
-                    Some(sql) => sql,
-                    None => {
-                        match sql
-                            .strip_prefix(format!("create table \"{}\" (", table_name).as_str())
-                        {
-                            Some(sql) => sql,
-                            None => sql
-                                .strip_prefix(format!("create table \"{}\"(", table_name).as_str())
-                                .unwrap_or_else(|| panic!("strip prefix: sql = '{sql}'")),
-                        }
-                    }
-                },
-            };
-            let columns = sql
-                .split(',')
-                .map(|col| col.trim().trim_matches('"'))
-                .collect::<Vec<_>>();
-            num_all_cols = columns.len();
-
-            // The outer loop is over columns that a user wants.
-            for column_name in &desired_column_names {
-                // The inner loop is over all columns that exist in the table,
-                // whose names were fetched above from the "sqlite_schema" table's "sql" column.
-                for (column_ordinal, col) in columns.iter().enumerate() {
-                    if col.trim().starts_with(column_name) {
-                        columns_found.push(*column_name);
-                        column_ordinals.push(column_ordinal);
-                        break;
-                    }
-                }
-            }
-
-            // Also check for the WHERE column.
-            for (column_ordinal, col) in columns.iter().enumerate() {
-                if col.trim().to_lowercase().starts_with(&where_col_name) {
-                    where_col_ord = column_ordinal;
-                    break;
-                }
+                column_ordinal += 1;
             }
         }
-    };
+    }
+
+    // Also check for the WHERE column.
+    for (mut column_ordinal, mut line) in sql.lines().enumerate() {
+        line = line.trim().trim_matches(',').trim();
+        let cols = line.split(',');
+        for col in cols {
+            let mut words = col.split_whitespace();
+            if words
+                .next()
+                .expect("Expected a column name.")
+                .to_lowercase()
+                == where_col_name
+            {
+                where_col_ord = column_ordinal;
+                break;
+            }
+            column_ordinal += 1;
+        }
+    }
+
+    let num_all_cols = sql
+        .lines()
+        .flat_map(|line| line.split(','))
+        .filter(|elt| !elt.is_empty())
+        .count();
 
     let requested_cols: HashSet<&&str> = HashSet::from_iter(&desired_column_names);
     let found_cols: HashSet<&&str> = HashSet::from_iter(&columns_found);
@@ -1544,6 +1433,20 @@ mod tests {
     }
 
     #[test]
+    fn select_id_name_from_companies_limit_5() {
+        let command = "SELECT id, name FROM companies LIMIT 5";
+        let expected = vec![
+            "159|global computer services llc".to_string(),
+            "168|noble foods co".to_string(),
+            "193|ipf softwares".to_string(),
+            "238|adamjee group".to_string(),
+            "654|art gallery line".to_string(),
+        ];
+        let result = select("test_dbs/companies.db", command).unwrap();
+        assert_eq!(expected, result);
+    }
+
+    #[test]
     fn select_id_name_from_companies_where_country_eritrea() {
         let command = "SELECT id, name FROM companies WHERE country = 'eritrea'";
         let expected = vec![
@@ -1563,18 +1466,6 @@ mod tests {
             "121311|unilink s.c.".to_string(),
             "2102438|orange asmara it solutions".to_string(),
             "5729848|zara mining share company".to_string(),
-        ];
-        let result = select("test_dbs/companies.db", command).unwrap();
-        assert_eq!(expected, result);
-    }
-
-    #[test]
-    fn select_id_name_from_companies_limit_3() {
-        let command = "SELECT id, name FROM companies LIMIT 3";
-        let expected = vec![
-            "159|global computer services llc".to_string(),
-            "168|noble foods co".to_string(),
-            "193|ipf softwares".to_string(),
         ];
         let result = select("test_dbs/companies.db", command).unwrap();
         assert_eq!(expected, result);

@@ -57,6 +57,7 @@ impl TablesMeta {
 /// The schema for a database is a description of all of the other tables, indexes, triggers, and views that
 /// are contained within the database. The schema table looks like this:
 ///
+/// ```text
 ///     CREATE TABLE sqlite_schema(
 ///       type text,
 ///       name text,
@@ -64,6 +65,7 @@ impl TablesMeta {
 ///       rootpage integer,
 ///       sql text
 ///     );
+/// ```
 ///
 /// The sqlite_schema table contains one row for each table, index, view, and trigger (collectively "objects")
 /// in the schema, except there is no entry for the sqlite_schema table itself.

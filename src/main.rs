@@ -4,6 +4,7 @@ use anyhow::{bail, Result};
 use codecrafters_sqlite::constants::SELECT_PATTERN;
 use codecrafters_sqlite::dot_cmd::{dot_dbinfo, dot_indexes, dot_tables};
 use codecrafters_sqlite::sql::select;
+use std::time::Instant;
 
 fn main() -> Result<()> {
     // Parse arguments
@@ -20,7 +21,9 @@ fn main() -> Result<()> {
 
     // SQL commands
     if command.to_lowercase().starts_with(SELECT_PATTERN) {
+        let start = Instant::now();
         let result = select(db_file_path, command)?;
+        eprintln!("\nTook {:.3?} to complete.", start.elapsed());
         for item in result {
             println!("{}", item);
         }
