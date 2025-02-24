@@ -12,9 +12,18 @@ use crate::serial_type::{
 use crate::tables::{get_tables_meta, SchemaTable};
 use crate::varint::get_varint;
 use anyhow::Result;
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fs::File;
 use std::iter::zip;
+
+/// Columns names, `WHERE` arguments (column name and value), table name, number of rows
+type CliArgsRest = (
+    Cow<'static, str>,
+    Option<(Cow<'static, str>, Cow<'static, str>)>,
+    Cow<'static, str>,
+    u64,
+);
 
 /// SQL `SELECT` command
 ///
@@ -61,8 +70,23 @@ pub fn select(db_file_path: &str, mut command: &str) -> Result<Vec<String>> {
                 Err(SqlError::SelectIncomplete)?
             }
         } else {
+            // `SELECT * FROM <table> WHERE <where_clause> LIMIT <limit>`
             // `SELECT <column1>, ..., <column_n> FROM <table> WHERE <where_clause> LIMIT <limit>`
-            return select_columns_from_table(db_file_path, rest);
+            let mut cli_args_rest = parse_cli_args_rest(db_file_path, rest)?;
+            let column_names = &mut cli_args_rest.0;
+            let table_name = &cli_args_rest.2;
+            let tables_meta = get_tables_meta(db_file_path)?;
+            if !tables_meta.0.contains_key(&**table_name) {
+                // In case a table with the given name, `table_name`, does not exist in the database, return that error.
+                Err(SqlError::NoSuchTable(table_name.to_string()))?
+            }
+            let table = &tables_meta.0[&**table_name];
+            let all_cols = get_all_columns_names(table);
+            let all_cols = &all_cols.join(",");
+            if column_names.trim().contains("*") {
+                *column_names = column_names.replace("*", all_cols).into();
+            }
+            return select_columns_from_table(db_file_path, cli_args_rest);
         }
     }
 
@@ -168,14 +192,12 @@ fn count_rows_in_order_rec(db_file: &mut File, page_size: u32, page: Page) -> Re
     Ok(num_rows)
 }
 
-/// `SELECT <column_1>, ..., <column_n> FROM <table> LIMIT <limit>`
+/// Returns columns names, `WHERE` arguments (column name and value), table name and number of rows.
+///
+/// `SELECT <column_1>, ..., <column_n> FROM <table> WHERE <where_clause> LIMIT <limit>`
 ///
 /// Column names can be provided in arbitrary order and can be repeated.
-///
-/// A leaf page for the table is assumed.
-///
-/// Returns error if the table, or at least one of the columns, doesn't exist.
-fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<String>> {
+fn parse_cli_args_rest(db_file_path: &str, mut rest: &str) -> Result<CliArgsRest> {
     let from_pos = rest
         .to_lowercase()
         .find(FROM_PATTERN)
@@ -209,6 +231,27 @@ fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<S
         select_count_rows_in_table(db_file_path, table_name)?
     };
 
+    let where_args = where_args.map(|(name, value)| (name.into(), value.to_string().into()));
+
+    Ok((
+        column_names.to_string().into(),
+        where_args,
+        table_name.to_string().into(),
+        num_rows,
+    ))
+}
+
+/// `SELECT <column_1>, ..., <column_n> FROM <table> WHERE <where_clause> LIMIT <limit>`
+///
+/// Column names can be provided in arbitrary order and can be repeated.
+///
+/// Returns error if the table, or at least one of the columns, doesn't exist.
+fn select_columns_from_table(
+    db_file_path: &str,
+    cli_args_rest: CliArgsRest,
+) -> Result<Vec<String>> {
+    let (column_names, where_args, table_name, num_rows) = cli_args_rest;
+
     let tables_meta = get_tables_meta(db_file_path)?;
     // eprintln!("tables_meta: {tables_meta:#?}");
 
@@ -216,7 +259,7 @@ fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<S
 
     // TODO: Search through the index and only in the end map to the table, to speed up the search.
 
-    if !tables_meta.0.contains_key(table_name) {
+    if !tables_meta.0.contains_key(&*table_name) {
         // In case a table with the given name, `table_name`, does not exist in the database, return that error.
         Err(SqlError::NoSuchTable(table_name.to_string()))?
     }
@@ -227,7 +270,7 @@ fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<S
     let db_file = &mut File::open(db_file_path)?;
 
     // We've found the requested table, `table_name`.
-    let table = &tables_meta.0[table_name];
+    let table = &tables_meta.0[&*table_name];
     // Now we need to jump to its pages and read the requested data.
     let page_num = table.rootpage;
 
@@ -237,7 +280,7 @@ fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<S
     // Generally, we don't need two functions for either functionality.
     match where_args {
         None => {
-            let (desired_columns, num_all_cols) = column_order(column_names, table)?;
+            let (desired_columns, num_all_cols) = column_order(&column_names, table)?;
 
             select_columns_in_order_rec(
                 db_file,
@@ -249,8 +292,10 @@ fn select_columns_from_table(db_file_path: &str, mut rest: &str) -> Result<Vec<S
             )?;
         }
         Some(where_args) => {
+            let where_args = (&*where_args.0, &*where_args.1);
+
             let (desired_columns, num_all_cols, where_column) =
-                column_order_where(column_names, table, where_args.clone())?;
+                column_order_where(&column_names, table, where_args)?;
 
             let (where_col_name, where_col_value) = where_args;
             let (_where_col_name, where_col_ord) = where_column;
@@ -359,7 +404,7 @@ fn select_columns_in_order_rec_where(
     page: Page,
     num_all_cols: usize,
     desired_columns: &Vec<(String, usize)>,
-    where_triple: &(String, usize, &str),
+    where_triple: &(&str, usize, &str),
     result: &mut Vec<String>,
 ) -> Result<()> {
     let page_header = page.get_header();
@@ -512,13 +557,17 @@ fn column_order(column_names: &str, table: &SchemaTable) -> Result<(Vec<(String,
             let cols = line.split(',');
             // The inner loop is over all columns that are stored on the line (be it one or more columns per line).
             for col in cols {
-                let mut words = col.split_whitespace();
-                if words
-                    .next()
-                    .expect("Expected a column name.")
-                    .to_lowercase()
-                    == column_name
-                {
+                let col = col.trim();
+                let quote_start = col.find('"');
+                let quote_end = col.rfind('"');
+                let col_name = match quote_start {
+                    Some(start) => match quote_end {
+                        Some(end) => &col[start + 1..end],
+                        None => panic!("Expected closing quote in '{col}'."),
+                    },
+                    None => col.split_once(' ').unwrap_or((col, "")).0,
+                };
+                if col_name.to_lowercase() == column_name {
                     columns_found.push(column_name);
                     column_ordinals.push(column_ordinal);
                 }
@@ -564,7 +613,7 @@ fn column_order(column_names: &str, table: &SchemaTable) -> Result<(Vec<(String,
 fn column_order_where(
     column_names: &str,
     table: &SchemaTable,
-    where_args: (String, &str),
+    where_args: (&str, &str),
 ) -> Result<(Vec<ColumnNameOrd>, usize, ColumnNameOrd)> {
     let desired_column_names = column_names.trim().to_lowercase();
     let desired_column_names = desired_column_names
@@ -607,13 +656,17 @@ fn column_order_where(
             let cols = line.split(',');
             // The inner loop is over all columns that are stored on the line (be it one or more columns per line).
             for col in cols {
-                let mut words = col.split_whitespace();
-                if words
-                    .next()
-                    .expect("Expected a column name.")
-                    .to_lowercase()
-                    == column_name
-                {
+                let col = col.trim();
+                let quote_start = col.find('"');
+                let quote_end = col.rfind('"');
+                let col_name = match quote_start {
+                    Some(start) => match quote_end {
+                        Some(end) => &col[start + 1..end],
+                        None => panic!("Expected closing quote in '{col}'."),
+                    },
+                    None => col.split_once(' ').unwrap_or((col, "")).0,
+                };
+                if col_name.to_lowercase() == column_name {
                     columns_found.push(column_name);
                     column_ordinals.push(column_ordinal);
                 }
@@ -627,13 +680,17 @@ fn column_order_where(
         line = line.trim().trim_matches(',').trim();
         let cols = line.split(',');
         for col in cols {
-            let mut words = col.split_whitespace();
-            if words
-                .next()
-                .expect("Expected a column name.")
-                .to_lowercase()
-                == where_col_name
-            {
+            let col = col.trim();
+            let quote_start = col.find('"');
+            let quote_end = col.rfind('"');
+            let col_name = match quote_start {
+                Some(start) => match quote_end {
+                    Some(end) => &col[start..=end],
+                    None => panic!("Expected closing quote in '{col}'."),
+                },
+                None => col.split_once(' ').unwrap_or((col, "")).0,
+            };
+            if col_name.to_lowercase() == where_col_name {
                 where_col_ord = column_ordinal;
                 break;
             }
@@ -669,6 +726,53 @@ fn column_order_where(
     let where_column = (where_col_name, where_col_ord);
 
     Ok((desired_columns, num_all_cols, where_column))
+}
+
+/// Returns all column names in the table.
+fn get_all_columns_names(table: &SchemaTable) -> Vec<String> {
+    let mut all_cols = Vec::new();
+
+    eprintln!("table: {table:#?}");
+    let table_type = table.tbl_type.to_lowercase();
+    let table_type = table_type.as_str();
+    let table_name = &table.tbl_name;
+
+    assert_eq!("table", table_type);
+
+    let sql = table.sql.to_lowercase();
+    let mut sql = sql.trim();
+
+    sql = sql
+        .strip_prefix(&format!("create table {table_name}"))
+        .unwrap_or(sql)
+        .trim();
+    sql = sql
+        .strip_prefix(&format!("create table \"{table_name}\""))
+        .unwrap_or(sql)
+        .trim();
+    sql = sql.strip_prefix('(').unwrap_or(sql).trim();
+    sql = sql.strip_suffix(')').unwrap_or(sql).trim();
+
+    // The outer loop is over all lines that are stored in the "sqlite_schema" table's "sql" column.
+    for mut line in sql.lines() {
+        line = line.trim().trim_matches(',').trim();
+        let cols = line.split(',');
+        // The inner loop is over all columns that are stored on the line (be it one or more columns per line).
+        for col in cols {
+            let col = col.trim();
+            let quote_start = col.find('"');
+            let quote_end = col.rfind('"');
+            let col_name = match quote_start {
+                Some(start) => match quote_end {
+                    Some(end) => &col[start + 1..end],
+                    None => panic!("Expected closing quote in '{col}'."),
+                },
+                None => col.split_once(' ').unwrap_or((col, "")).0,
+            };
+            all_cols.push(col_name.to_string());
+        }
+    }
+    all_cols
 }
 
 /// Gets data from desired columns for all rows on the table leaf page.
@@ -771,10 +875,10 @@ fn get_columns_data_for_all_rows_on_table_leaf_page_where(
     page: &Page,
     num_all_cols: usize,
     desired_columns: &Vec<(String, usize)>,
-    where_triple: &(String, usize, &str),
+    where_triple: &(&str, usize, &str),
     result: &mut Vec<String>,
 ) -> Result<()> {
-    let (where_col_name, where_col_ord, where_col_value) = where_triple.clone();
+    let (where_col_name, where_col_ord, where_col_value) = *where_triple;
 
     // "The cell pointer array of a b-tree page immediately follows the b-tree page header. Let K be the number
     // of cells on the btree. The cell pointer array consists of K 2-byte integer offsets to the cell contents.
@@ -1372,6 +1476,27 @@ mod tests {
     }
 
     #[test]
+    fn select_id_asterisk_asterisk_id_asterisk_color_from_apples() {
+        let command = "SELECT id, *, *, id, *, color FROM apples";
+        let expected = vec![
+            "1|1|Granny Smith|Light Green|1|Granny Smith|Light Green|1|1|Granny Smith|Light Green|Light Green".to_string(),
+            "2|2|Fuji|Red|2|Fuji|Red|2|2|Fuji|Red|Red".to_string(),
+            "3|3|Honeycrisp|Blush Red|3|Honeycrisp|Blush Red|3|3|Honeycrisp|Blush Red|Blush Red".to_string(),
+            "4|4|Golden Delicious|Yellow|4|Golden Delicious|Yellow|4|4|Golden Delicious|Yellow|Yellow".to_string()
+        ];
+        let result = select("sample.db", command).unwrap();
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn select_id_asterisk_asterisk_id_asterisk_color_from_apples_where_color_red() {
+        let command = "SELECT id, *, *, id, *, color FROM apples WHERE color = 'Red'";
+        let expected = vec!["2|2|Fuji|Red|2|Fuji|Red|2|2|Fuji|Red|Red".to_string()];
+        let result = select("sample.db", command).unwrap();
+        assert_eq!(expected, result);
+    }
+
+    #[test]
     fn select_count_rows_superheroes() {
         let command = "SELECT COUNT(*) FROM superheroes";
         let expected = 6895.to_string();
@@ -1466,6 +1591,63 @@ mod tests {
             "121311|unilink s.c.".to_string(),
             "2102438|orange asmara it solutions".to_string(),
             "5729848|zara mining share company".to_string(),
+        ];
+        let result = select("test_dbs/companies.db", command).unwrap();
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn select_id_size_range_from_companies_limit_5() {
+        let command = "SELECT id, \"size range\" FROM companies LIMIT 5";
+        let expected = vec![
+            "159|51 - 200".to_string(),
+            "168|1 - 10".to_string(),
+            "193|11 - 50".to_string(),
+            "238|1 - 10".to_string(),
+            "654|1 - 10".to_string(),
+        ];
+        let result = select("test_dbs/companies.db", command).unwrap();
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn select_id_size_range_from_companies_where_size_range_limit_5() {
+        let command =
+            "SELECT id, \"size range\" FROM companies WHERE \"size range\" = '11 - 50' LIMIT 5";
+        let expected = vec![
+            "193|11 - 50".to_string(),
+            "782|11 - 50".to_string(),
+            "1282|11 - 50".to_string(),
+            "2442|11 - 50".to_string(),
+            "2466|11 - 50".to_string(),
+        ];
+        let result = select("test_dbs/companies.db", command).unwrap();
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn select_asterisk_from_companies_limit_5() {
+        let command = "SELECT * FROM companies LIMIT 5";
+        let expected = vec![
+            "159|global computer services llc|globcom-oman.com|1998.0|computer software|51 - 200|burnsville, minnesota, united states|oman|24|35".to_string(),
+            "168|noble foods co|||logistics and supply chain|1 - 10||guernsey|1|1".to_string(),
+            "193|ipf softwares|ipfsoftwares.com|2013.0|information technology and services|11 - 50|dar es salaam, dar es salaam, tanzania|tanzania|5|7".to_string(),
+            "238|adamjee group|adamjee.mu|1979.0|real estate|1 - 10|grand baie, riviere du rempart, mauritius|mauritius|1|1".to_string(),
+            "654|art gallery line|artgalleryline.com|2003.0|fine art|1 - 10|tbilisi, dushet'is raioni, georgia|georgia|2|2".to_string(),
+        ];
+        let result = select("test_dbs/companies.db", command).unwrap();
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn select_asterisk_from_companies_where_size_range_limit_5() {
+        let command = "SELECT * FROM companies WHERE \"size range\" = '11 - 50' LIMIT 5";
+        let expected = vec![
+            "193|ipf softwares|ipfsoftwares.com|2013.0|information technology and services|11 - 50|dar es salaam, dar es salaam, tanzania|tanzania|5|7".to_string(),
+            "782|ameco international travel|amecotravel.com|1977.0|airlines/aviation|11 - 50||fiji|5|6".to_string(),
+            "1282|formesan dominicana srl|formesan.com.co||civil engineering|11 - 50|santo domingo oeste, santo domingo, dominican republic|dominican republic|9|17".to_string(),
+            "2442|f5 llc|f5innovative.az|2014.0|information technology and services|11 - 50|baku, baki, azerbaijan|azerbaijan|6|14".to_string(),
+            "2466|ascot barclay cyber security group|ascotbarclay.com|2004.0|security and investigations|11 - 50|london, greater london, united kingdom|guernsey|4|12".to_string(),
         ];
         let result = select("test_dbs/companies.db", command).unwrap();
         assert_eq!(expected, result);

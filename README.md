@@ -153,6 +153,14 @@ Honeycrisp|Blush Red
 Golden Delicious|Yellow
 ```
 
+```shell
+$ ./your_program.sh sample.db "SELECT * FROM apples"
+1|Granny Smith|Light Green
+2|Fuji|Red
+3|Honeycrisp|Blush Red
+4|Golden Delicious|Yellow
+```
+
 Additionally, `LIMIT` is supported.
 
 ```shell
@@ -206,11 +214,12 @@ The test database contains a `companies` table with an index named `idx_companie
 We can download a small version of the `companies` database to test locally.
 
 ```shell
-$ ./your_program.sh companies.db "SELECT id, name FROM companies WHERE country = 'eritrea'"
-121311|unilink s.c.
-2102438|orange asmara it solutions
-5729848|zara mining share company
-6634629|asmara rental
+$ ./your_program.sh companies.db "SELECT id, name FROM companies WHERE country = 'micronesia'"
+1307865|college of micronesia
+3696903|nanofabrica
+4023193|fsm statistics
+6132291|vital energy micronesia
+6387751|fsm development bank
 ```
 
 We can assume that all queries run by the tester will include `country` in the `WHERE` clause,
@@ -223,5 +232,5 @@ Since the table `superheroes` is smaller than `companies`, we can add an index t
 $ sqlite3 superheroes.db "CREATE INDEX idx_superheroes_eye_color on superheroes (eye_color)"
 
 $ ./your_program.sh superheroes.db "SELECT id, name FROM superheroes LIMIT 10"
-$ ./your_program.sh superheroes.db "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes'"
+$ ./your_program.sh superheroes.db "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes' LIMIT 3"
 ```
