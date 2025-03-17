@@ -1,0 +1,158 @@
+dominican republic|1881
+malta|1853
+kuwait|1758
+nepal|1611
+guatemala|1588
+puerto rico|1350
+oman|1337
+fiji|1316
+bahrain|1301
+georgia|1293
+algeria|1292
+azerbaijan|1205
+macedonia|1181
+cameroon|1149
+uganda|1142
+cambodia|1123
+tanzania|1053
+belarus|1049
+armenia|1021
+iceland|1017
+mauritius|1007
+bosnia and herzegovina|996
+bolivia|976
+kazakhstan|943
+myanmar|799
+el salvador|779
+albania|775
+jamaica|772
+iraq|768
+paraguay|753
+bermuda|744
+angola|721
+senegal|688
+isle of man|587
+jersey|583
+moldova|553
+nicaragua|545
+honduras|528
+monaco|518
+mozambique|513
+côte d’ivoire|485
+zambia|480
+trinidad and tobago|479
+mongolia|459
+palestine|439
+syria|438
+ethiopia|426
+namibia|386
+afghanistan|376
+cayman islands|367
+libya|346
+montenegro|337
+democratic republic of the congo|329
+guernsey|325
+saint lucia|318
+sudan|311
+maldives|302
+bahamas|301
+botswana|299
+rwanda|289
+madagascar|282
+benin|280
+british virgin islands|280
+gibraltar|277
+liechtenstein|260
+curaçao|249
+andorra|245
+papua new guinea|243
+belize|218
+uzbekistan|213
+guadeloupe|180
+suriname|175
+malawi|168
+togo|166
+barbados|165
+new caledonia|165
+macau|149
+martinique|147
+seychelles|132
+aruba|130
+cuba|123
+san marino|120
+gabon|117
+laos|116
+yemen|115
+netherlands antilles|114
+kyrgyzstan|109
+burkina faso|102
+greenland|100
+brunei|99
+faroe islands|95
+guinea|95
+kosovo|85
+haiti|79
+somalia|77
+french polynesia|76
+mali|75
+sierra leone|75
+réunion|73
+cape verde|70
+kiribati|63
+liberia|63
+french guiana|62
+swaziland|62
+turks and caicos islands|60
+bhutan|58
+guam|54
+saint vincent and the grenadines|51
+guyana|49
+tajikistan|49
+equatorial guinea|48
+Åland islands|48
+lesotho|42
+gambia|40
+vanuatu|40
+mauritania|38
+south sudan|38
+burundi|35
+caribbean netherlands|30
+niger|29
+saint kitts and nevis|28
+turkmenistan|27
+cook islands|26
+djibouti|26
+dominica|26
+tuvalu|25
+samoa|24
+anguilla|21
+marshall islands|18
+mayotte|18
+solomon islands|15
+antigua and barbuda|14
+guinea-bissau|14
+northern mariana islands|14
+svalbard and jan mayen|14
+são tomé and príncipe|14
+timor-leste|14
+chad|12
+grenada|10
+palau|7
+saint martin|7
+sint maarten|7
+american samoa|6
+comoros|6
+north korea|6
+micronesia|5
+tonga|5
+central african republic|4
+eritrea|4
+republic of the congo|4
+montserrat|3
+western sahara|3
+niue|1
+norfolk island|1
+saint barthélemy|1
+saint helena|1
+saint pierre and miquelon|1
+u.s. virgin islands|1

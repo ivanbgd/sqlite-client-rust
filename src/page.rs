@@ -1,6 +1,39 @@
 //! # Page
 //!
+//! [1.2. Pages](https://www.sqlite.org/fileformat.html#pages)
+//!
+//! The main database file consists of one or more pages.
+//! The size of a page is a power of two between 512 and 65536 inclusive.
+//! All pages within the same database are the same size.
+//! The page size for a database file is determined by the 2-byte integer located at an offset of 16 bytes
+//! from the beginning of the database file.
+//!
+//! Pages are numbered beginning with 1. The maximum page number is 4294967294 (232 - 2).
+//! The minimum size SQLite database is a single 512-byte page.
+//! The maximum size database would be 4294967294 pages at 65536 bytes per page or about 281 terabytes.
+//!
 //! [1.6. B-tree Pages](https://www.sqlite.org/fileformat.html#b_tree_pages)
+//!
+//! The b-tree algorithm provides key/data storage with unique and ordered keys on page-oriented storage devices.
+//! Two variants of b-trees are used by SQLite.
+//! "Table b-trees" use a 64-bit signed integer key and store all data in the leaves.
+//! "Index b-trees" use arbitrary keys and store no data at all.
+//!
+//! A b-tree page is either an interior page or a leaf page.
+//! A leaf page contains keys and in the case of a table b-tree each key has associated data.
+//! An interior page contains K keys together with K+1 pointers to child b-tree pages.
+//! A "pointer" in an interior b-tree page is just the 32-bit unsigned integer page number of the child page.
+//!
+//! In an interior b-tree page, the pointers and keys logically alternate with a pointer on both ends.
+//! All keys within the same page are unique and are logically organized in ascending order from left to right.
+//! (Again, this ordering is logical, not physical. The actual location of keys within the page is arbitrary.)
+//! For any key X, pointers to the left of an X refer to b-tree pages on which all keys are less than or equal to X.
+//! Pointers to the right of X refer to pages where all keys are greater than X.
+//!
+//! Within an interior b-tree page, each key and the pointer to its immediate left are combined into a structure
+//! called a "cell". The right-most pointer is held separately. A leaf b-tree page has no pointers, but it still uses
+//! the cell structure to hold keys for index b-trees or keys and content for table b-trees.
+//! Data is also contained in the cell.
 //!
 //! A b-tree page is either a table b-tree page or an index b-tree page.
 //! All pages within each complete b-tree are of the same type: either table or index.
@@ -12,6 +45,32 @@
 //! Each entry in a table b-tree consists of a 64-bit signed integer key and up to 2147483647 bytes of arbitrary data.
 //! (The key of a table b-tree corresponds to the rowid of the SQL table that the b-tree implements.)
 //! Interior table b-trees hold only keys and pointers to children. All data is contained in the table b-tree leaves.
+//!
+//! Each entry in an index b-tree consists of an arbitrary key of up to 2147483647 bytes in length and no data.
+//!
+//! Define the "payload" of a cell to be the arbitrary length section of the cell.
+//! For an index b-tree, the key is always arbitrary in length and hence the payload is the key.
+//! There are no arbitrary length elements in the cells of interior table b-tree pages and so those cells have no payload.
+//! Table b-tree leaf pages contain arbitrary length content and so for cells on those pages the payload is the content.
+//!
+//! A b-tree page is divided into regions in the following order:
+//!  1. The 100-byte database file header (found on page 1 only)
+//!  2. The 8 or 12 byte b-tree page header
+//!  3. The cell pointer array
+//!  4. Unallocated space
+//!  5. The cell content area
+//!  6. The reserved region
+//!
+//! The 100-byte database file header is found only on page 1, which is always a table b-tree page.
+//! All other b-tree pages in the database file omit this 100-byte header.
+//!
+//! The b-tree page header is 8 bytes in size for leaf pages and 12 bytes for interior pages.
+//! All multibyte values in the page header are big-endian.
+//!
+//! The cell pointer array of a b-tree page immediately follows the b-tree page header. Let K be the number of cells
+//! on the btree. The cell pointer array consists of K 2-byte integer offsets to the cell contents. The cell pointers
+//! are arranged in key order with left-most cell (the cell with the smallest key) first and the right-most cell
+//! (the cell with the largest key) last.
 
 use crate::constants::DB_HEADER;
 use anyhow::Result;
@@ -21,7 +80,9 @@ use std::io::{Read, Seek, SeekFrom};
 /// B-tree page
 #[derive(Debug, Clone)]
 pub(crate) struct Page {
+    /// Entire contents of a page.
     pub(crate) contents: Vec<u8>,
+    /// Page number, 1-based.
     pub(crate) page_num: u32,
 }
 
@@ -62,6 +123,7 @@ impl Page {
     ///
     /// The b-tree page header is 8 bytes in size for leaf pages and 12 bytes for interior pages.
     pub(crate) fn get_header(&self) -> PageHeader {
+        // We take a maximum of 12 bytes into account, and we'll later discard the last 4 bytes if necessary (below).
         let cont = if self.page_num == 1 {
             &self.contents[DB_HEADER.len()..][..DB_HEADER.len() + 12]
         } else {
@@ -225,6 +287,7 @@ mod tests {
     }
 
     #[test]
+    /// This is a table interior page.
     fn page_header_page_header_superheroes_page_2() {
         let page_size = page_size("test_dbs/superheroes.db").unwrap();
         let mut db_file = File::open("test_dbs/superheroes.db").unwrap();

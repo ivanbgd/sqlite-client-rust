@@ -26,7 +26,8 @@ use std::io::{Read, Seek, SeekFrom};
 ///
 /// The metadata are extracted from the schema table.
 ///
-/// This is a tuple-struct that contains a hashmap of metadata for each table in DB, keyed by table name.
+/// This is a tuple-struct that contains a hashmap of metadata for each table in DB, keyed by table `name`
+/// (not by `table_name`!).
 #[derive(Debug)]
 pub(crate) struct TablesMeta(pub(crate) HashMap<String, SchemaTable>);
 
@@ -84,7 +85,7 @@ pub(crate) struct SchemaTable {
 }
 
 impl SchemaTable {
-    fn new(tbl_type: String, name: String, tbl_name: String, rootpage: u32, sql: String) -> Self {
+    pub(crate) fn new(tbl_type: String, name: String, tbl_name: String, rootpage: u32, sql: String) -> Self {
         Self {
             tbl_type,
             name,

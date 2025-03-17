@@ -214,12 +214,11 @@ The test database contains a `companies` table with an index named `idx_companie
 We can download a small version of the `companies` database to test locally.
 
 ```shell
-$ ./your_program.sh companies.db "SELECT id, name FROM companies WHERE country = 'micronesia'"
-1307865|college of micronesia
-3696903|nanofabrica
-4023193|fsm statistics
-6132291|vital energy micronesia
-6387751|fsm development bank
+$ ./your_program.sh companies.db "SELECT id, name FROM companies WHERE country = 'eritrea'"
+121311|unilink s.c.
+2102438|orange asmara it solutions
+5729848|zara mining share company
+6634629|asmara rental
 ```
 
 We can assume that all queries run by the tester will include `country` in the `WHERE` clause,
@@ -233,4 +232,25 @@ $ sqlite3 superheroes.db "CREATE INDEX idx_superheroes_eye_color on superheroes 
 
 $ ./your_program.sh superheroes.db "SELECT id, name FROM superheroes LIMIT 10"
 $ ./your_program.sh superheroes.db "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes' LIMIT 3"
+```
+
+# Additional Notes
+
+## The Companies Database
+
+The local (smaller) version of the `Companies` database can be used for testing of use of index that exists
+on the `Country` column of the `Companies` table.
+
+The file "test_dbs/countries_by_count_desc.txt" contains all countries and their counts sorted by count
+in descending order. It was obtained with:
+
+```shell
+$ sqlite3 test_dbs/companies.db "SELECT country, COUNT(*) FROM companies GROUP BY country ORDER BY COUNT(*) DESC" > test_dbs/countries_by_count_desc.txt
+```
+
+The file "test_dbs/countries_by_country.txt" contains all countries and their counts sorted by country name.
+It was obtained with:
+
+```shell
+$ sqlite3 test_dbs/companies.db "SELECT country, COUNT(*) FROM companies GROUP BY country ORDER BY country" > test_dbs/countries_by_country.txt
 ```

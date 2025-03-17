@@ -1,0 +1,158 @@
+afghanistan|376
+albania|775
+algeria|1292
+american samoa|6
+andorra|245
+angola|721
+anguilla|21
+antigua and barbuda|14
+armenia|1021
+aruba|130
+azerbaijan|1205
+bahamas|301
+bahrain|1301
+barbados|165
+belarus|1049
+belize|218
+benin|280
+bermuda|744
+bhutan|58
+bolivia|976
+bosnia and herzegovina|996
+botswana|299
+british virgin islands|280
+brunei|99
+burkina faso|102
+burundi|35
+cambodia|1123
+cameroon|1149
+cape verde|70
+caribbean netherlands|30
+cayman islands|367
+central african republic|4
+chad|12
+comoros|6
+cook islands|26
+cuba|123
+curaçao|249
+côte d’ivoire|485
+democratic republic of the congo|329
+djibouti|26
+dominica|26
+dominican republic|1881
+el salvador|779
+equatorial guinea|48
+eritrea|4
+ethiopia|426
+faroe islands|95
+fiji|1316
+french guiana|62
+french polynesia|76
+gabon|117
+gambia|40
+georgia|1293
+gibraltar|277
+greenland|100
+grenada|10
+guadeloupe|180
+guam|54
+guatemala|1588
+guernsey|325
+guinea|95
+guinea-bissau|14
+guyana|49
+haiti|79
+honduras|528
+iceland|1017
+iraq|768
+isle of man|587
+jamaica|772
+jersey|583
+kazakhstan|943
+kiribati|63
+kosovo|85
+kuwait|1758
+kyrgyzstan|109
+laos|116
+lesotho|42
+liberia|63
+libya|346
+liechtenstein|260
+macau|149
+macedonia|1181
+madagascar|282
+malawi|168
+maldives|302
+mali|75
+malta|1853
+marshall islands|18
+martinique|147
+mauritania|38
+mauritius|1007
+mayotte|18
+micronesia|5
+moldova|553
+monaco|518
+mongolia|459
+montenegro|337
+montserrat|3
+mozambique|513
+myanmar|799
+namibia|386
+nepal|1611
+netherlands antilles|114
+new caledonia|165
+nicaragua|545
+niger|29
+niue|1
+norfolk island|1
+north korea|6
+northern mariana islands|14
+oman|1337
+palau|7
+palestine|439
+papua new guinea|243
+paraguay|753
+puerto rico|1350
+republic of the congo|4
+rwanda|289
+réunion|73
+saint barthélemy|1
+saint helena|1
+saint kitts and nevis|28
+saint lucia|318
+saint martin|7
+saint pierre and miquelon|1
+saint vincent and the grenadines|51
+samoa|24
+san marino|120
+senegal|688
+seychelles|132
+sierra leone|75
+sint maarten|7
+solomon islands|15
+somalia|77
+south sudan|38
+sudan|311
+suriname|175
+svalbard and jan mayen|14
+swaziland|62
+syria|438
+são tomé and príncipe|14
+tajikistan|49
+tanzania|1053
+timor-leste|14
+togo|166
+tonga|5
+trinidad and tobago|479
+turkmenistan|27
+turks and caicos islands|60
+tuvalu|25
+u.s. virgin islands|1
+uganda|1142
+uzbekistan|213
+vanuatu|40
+western sahara|3
+yemen|115
+zambia|480
+Åland islands|48

@@ -19,7 +19,7 @@ use std::io::Read;
 
 /// Gets a single *varint* from a [`Page`] contents that's loaded in memory.
 ///
-/// Reads from the given `offset` in the page - the `offset` is relative to the page contents start.
+/// Reads from the given `offset` on the page - the `offset` is relative to the page contents start.
 ///
 /// It updates `offset` so it can be reused after being updated in this function.
 /// This means that `offset` is an in-out parameter.

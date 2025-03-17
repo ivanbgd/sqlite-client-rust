@@ -322,7 +322,7 @@ mod tests {
     use crate::page::Page;
     use crate::serial_type::{
         get_serial_type_integer, get_serial_type_to_content, read_serial_type_integer,
-        read_serial_type_to_content, SerialTypeValue,
+        read_serial_type_to_content, serial_type_to_content_size, SerialTypeValue,
     };
     use std::fs::File;
     use std::io::{Seek, SeekFrom};
@@ -416,6 +416,20 @@ mod tests {
         let result = read_serial_type_to_content(&mut db_file, n).unwrap();
         assert_eq!(expected, result.0);
         assert_eq!(16, result.1);
+    }
+
+    #[test]
+    fn get_serial_type_text() {
+        // Really meant as a serial type contents in the DB file.
+        let expected = SerialTypeValue::Text("Golden Delicious".to_string());
+        let mut db_file = File::open("sample.db").unwrap();
+        let page_size = dot_cmd::page_size("sample.db").unwrap();
+        let page = Page::new(&mut db_file, page_size, 2).unwrap();
+        let mut offset = (0x1fa7 - page_size) as u16; // bytes 0x47 ...
+        let n: VarintType = 0x2d;
+        let result = get_serial_type_to_content(&page, &mut offset, n).unwrap();
+        assert_eq!(expected, result.0);
+        assert_eq!(serial_type_to_content_size(n).unwrap() as u16, result.1);
     }
 
     /// Really meant as a serial type integer in the DB file; a single byte, though.
