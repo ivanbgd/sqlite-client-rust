@@ -158,6 +158,16 @@ fn count_rows_in_order_rec(db_file: &mut File, page_size: u32, page: Page) -> Re
             return Ok(page_header.num_cells as u64);
         }
         PageType::TableInterior => {
+            // Visit the rightmost child first, for performance reasons.
+            // eprintln!("R {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells);
+            let page_num = page_header
+                .rightmost_ptr
+                .expect("Expected PageType::TableInterior.");
+            // Rightmost pointer is page number of the rightmost child.
+            let right_child = Page::new(db_file, page_size, page_num)?;
+            num_rows += count_rows_in_order_rec(db_file, page_size, right_child)?;
+
+            // Visit left children.
             // eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells);
             for cell_ptr in page.get_cell_ptr_array() {
                 // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
@@ -166,20 +176,22 @@ fn count_rows_in_order_rec(db_file: &mut File, page_size: u32, page: Page) -> Re
                 let left_child = Page::new(db_file, page_size, page_num)?;
                 num_rows += count_rows_in_order_rec(db_file, page_size, left_child)?;
             }
-            // Visit the rightmost child.
-            // eprintln!("R {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells);
-            let page_num = page_header
-                .rightmost_ptr
-                .expect("Expected PageType::TableInterior.");
-            // Rightmost pointer is page number of the rightmost child.
-            let right_child = Page::new(db_file, page_size, page_num)?;
-            num_rows += count_rows_in_order_rec(db_file, page_size, right_child)?;
         }
         PageType::IndexLeaf => {
             // eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells);
             return Ok(page_header.num_cells as u64);
         }
         PageType::IndexInterior => {
+            // Visit the rightmost child first, for performance reasons.
+            // eprintln!("R {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells);
+            let page_num = page_header
+                .rightmost_ptr
+                .expect("Expected PageType::IndexInterior.");
+            // Rightmost pointer is page number of the rightmost child.
+            let right_child = Page::new(db_file, page_size, page_num)?;
+            num_rows += count_rows_in_order_rec(db_file, page_size, right_child)?;
+
+            // Visit left children.
             // eprintln!("L {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells);
             for cell_ptr in page.get_cell_ptr_array() {
                 // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
@@ -188,14 +200,6 @@ fn count_rows_in_order_rec(db_file: &mut File, page_size: u32, page: Page) -> Re
                 let left_child = Page::new(db_file, page_size, page_num)?;
                 num_rows += count_rows_in_order_rec(db_file, page_size, left_child)? + 1;
             }
-            // Visit the rightmost child.
-            // eprintln!("R {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:04x?}, num_cells: {}", page.page_num, page_header.num_cells);
-            let page_num = page_header
-                .rightmost_ptr
-                .expect("Expected PageType::IndexInterior.");
-            // Rightmost pointer is page number of the rightmost child.
-            let right_child = Page::new(db_file, page_size, page_num)?;
-            num_rows += count_rows_in_order_rec(db_file, page_size, right_child)?;
         }
     }
 
@@ -460,6 +464,24 @@ fn get_indexed_row_ids(
         }
         PageType::IndexInterior => {
             // eprintln!("L IndexInterior {page_type:?} => page_start = 0x{page_start:08x}, page_num: 0x{:08x?}, num_cells: {}", index_page.page_num, page_header.num_cells);
+
+            // Visit the rightmost child first, to save execution time in case we don't have to loop over left children,
+            // which is in 50% of cases on average.
+            // Perhaps the order isn't intuitive, to first go right and then left, but it saves time.
+            let rightmost_page_num = page_header
+                .rightmost_ptr
+                .expect("Expected PageType::IndexInterior and the rightmost child.");
+            // Rightmost pointer is page number of the rightmost child.
+            let rightmost_child = Page::new(db_file, page_size, rightmost_page_num)?;
+            get_indexed_row_ids(
+                db_file,
+                page_size,
+                &rightmost_child,
+                demanded_index_value,
+                row_ids,
+            )?;
+
+            // Visit left children. We loop only in 50% of cases on average.
             for cell_ptr in index_page.get_cell_ptr_array() {
                 // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
                 // Cell contains: (Page number of left child, Number of bytes of payload, Payload, ...) as (u32, varint, byte array, ...).
@@ -498,19 +520,6 @@ fn get_indexed_row_ids(
                     // We need to iterate further.
                 }
             }
-            // Visit the rightmost child.
-            let rightmost_page_num = page_header
-                .rightmost_ptr
-                .expect("Expected PageType::IndexInterior and the rightmost child.");
-            // Rightmost pointer is page number of the rightmost child.
-            let rightmost_child = Page::new(db_file, page_size, rightmost_page_num)?;
-            get_indexed_row_ids(
-                db_file,
-                page_size,
-                &rightmost_child,
-                demanded_index_value,
-                row_ids,
-            )?;
         }
         other => panic!("Page type {other:?} encountered where it shouldn't be!"),
     }
@@ -577,6 +586,27 @@ fn indexed_select_columns_in_order_rec_where(
             }
         }
         PageType::TableInterior => {
+            // Visit the rightmost child first, to save execution time in case we don't have to loop over left children,
+            // which is in 50% of cases on average.
+            // Perhaps the order isn't intuitive, to first go right and then left, but it saves time.
+            let rightmost_page_num = page_header
+                .rightmost_ptr
+                .expect("Expected PageType::IndexInterior and the rightmost child.");
+            // Rightmost pointer is page number of the rightmost child.
+            let rightmost_child = Page::new(db_file, page_size, rightmost_page_num)?;
+            indexed_select_columns_in_order_rec_where(
+                db_file,
+                page_size,
+                &rightmost_child,
+                num_all_cols,
+                desired_columns,
+                where_triple,
+                demanded_row_id,
+                result,
+            )?;
+
+            // Visit left children. We loop only in 50% of cases on average.
+            //
             // Checking the demanded row ID against the lowest and highest row IDs in the cell pointer array first,
             // in order to decide which path to take and potentially skip the following loop, doesn't shorten
             // the execution time. I tried it and I removed it.
@@ -608,22 +638,6 @@ fn indexed_select_columns_in_order_rec_where(
                     return Ok(());
                 }
             }
-            // Visit the rightmost child.
-            let rightmost_page_num = page_header
-                .rightmost_ptr
-                .expect("Expected PageType::IndexInterior and the rightmost child.");
-            // Rightmost pointer is page number of the rightmost child.
-            let rightmost_child = Page::new(db_file, page_size, rightmost_page_num)?;
-            indexed_select_columns_in_order_rec_where(
-                db_file,
-                page_size,
-                &rightmost_child,
-                num_all_cols,
-                desired_columns,
-                where_triple,
-                demanded_row_id,
-                result,
-            )?;
         }
         other => panic!("Page type {other:?} encountered where it shouldn't be!"),
     }
@@ -715,6 +729,7 @@ fn select_columns_in_order_rec(
             )?;
         }
         PageType::TableInterior => {
+            // Visit left children.
             for cell_ptr in page.get_cell_ptr_array() {
                 // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
                 let page_num = &page.contents[cell_ptr as usize..][..4];
@@ -730,7 +745,7 @@ fn select_columns_in_order_rec(
                     result,
                 )?;
             }
-            // Visit the rightmost child.
+            // Visit the rightmost child. For some reason, in this function *only*, we need to visit it last.
             let page_num = page_header.rightmost_ptr.expect("Expected interior table.");
             // Rightmost pointer is page number of the rightmost child.
             let right_child = Page::new(db_file, page_size, page_num)?;
@@ -783,6 +798,20 @@ fn select_columns_in_order_rec_where(
             )?;
         }
         PageType::TableInterior => {
+            // Visit the rightmost child first, for performance reasons.
+            let page_num = page_header.rightmost_ptr.expect("Expected interior table.");
+            // Rightmost pointer is page number of the rightmost child.
+            let right_child = Page::new(db_file, page_size, page_num)?;
+            select_columns_in_order_rec_where(
+                db_file,
+                page_size,
+                &right_child,
+                num_all_cols,
+                desired_columns,
+                where_triple,
+                result,
+            )?;
+            // Visit left children.
             for cell_ptr in page.get_cell_ptr_array() {
                 // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
                 let page_num = &page.contents[cell_ptr as usize..][..4];
@@ -799,19 +828,6 @@ fn select_columns_in_order_rec_where(
                     result,
                 )?;
             }
-            // Visit the rightmost child.
-            let page_num = page_header.rightmost_ptr.expect("Expected interior table.");
-            // Rightmost pointer is page number of the rightmost child.
-            let right_child = Page::new(db_file, page_size, page_num)?;
-            select_columns_in_order_rec_where(
-                db_file,
-                page_size,
-                &right_child,
-                num_all_cols,
-                desired_columns,
-                where_triple,
-                result,
-            )?;
         }
         other => panic!("Page type {other:?} encountered where it shouldn't be!"),
     }
