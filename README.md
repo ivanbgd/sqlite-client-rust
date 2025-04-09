@@ -1,40 +1,4 @@
-[![progress-banner](https://backend.codecrafters.io/progress/sqlite/b3b12e89-a536-4604-be71-ddd7dab3056e)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
-
-This is a starting point for Rust solutions to the
-["Build Your Own SQLite" Challenge](https://codecrafters.io/challenges/sqlite).
-
-In this challenge, you'll build a barebones SQLite implementation that supports
-basic SQL queries like `SELECT`. Along the way we'll learn about
-[SQLite's file format](https://www.sqlite.org/fileformat.html), how indexed data
-is
-[stored in B-trees](https://jvns.ca/blog/2014/10/02/how-does-sqlite-work-part-2-btrees/)
-and more.
-
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
-
-# Passing the first stage
-
-The entry point for your SQLite implementation is in `src/main.rs`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
-
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
-```
-
-Time to move on to the next stage!
-
-# Stage 2 & beyond
-
-Note: This section is for stages 2 and beyond.
-
-1. Ensure you have `cargo (1.82)` installed locally
-2. Run `./your_program.sh` to run your program, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-3. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+# SQLite Client
 
 # Sample Databases
 
@@ -73,8 +37,7 @@ download them by running this script:
 ```
 
 If the script doesn't work for some reason, you can download the databases
-directly from
-[codecrafters-io/sample-sqlite-databases](https://github.com/codecrafters-io/sample-sqlite-databases).
+directly from [here](https://github.com/codecrafters-io/sample-sqlite-databases).
 
 # Running the Program
 
@@ -93,7 +56,7 @@ Supported dot-commands are also case-insensitive.
 - To emulate `$ sqlite3 sample.db .dbinfo`:
 
 ```shell
-$ ./your_program.sh sample.db .dbinfo
+$ ./run.sh sample.db .dbinfo
 database page size: 4096
 number of pages: 4
 number of tables: 3
@@ -103,15 +66,15 @@ text encoding: utf-8
 - To emulate `$ sqlite3 sample.db .tables`:
 
 ```shell
-$ ./your_program.sh sample.db .tables
+$ ./run.sh sample.db .tables
 apples oranges
 ```
 
 - To emulate `$ sqlite3 companies.db .index` or `$ sqlite3 companies.db .indexes`:
 
 ```shell
-$ ./your_program.sh companies.db .index
-$ ./your_program.sh companies.db .indexes
+$ ./run.sh companies.db .index
+$ ./run.sh companies.db .indexes
 idx_companies_country
 ```
 
@@ -120,14 +83,14 @@ idx_companies_country
 ### Count number of rows in a table
 
 ```shell
-$ ./your_program.sh sample.db "SELECT COUNT(*) FROM apples"
+$ ./run.sh sample.db "SELECT COUNT(*) FROM apples"
 4
 ```
 
 ### Select from a single column
 
 ```shell
-$ ./your_program.sh sample.db "SELECT name FROM apples"
+$ ./run.sh sample.db "SELECT name FROM apples"
 Granny Smith
 Fuji
 Honeycrisp
@@ -137,7 +100,7 @@ Golden Delicious
 Additionally, `LIMIT` is supported.
 
 ```shell
-$ ./your_program.sh sample.db "SELECT name FROM apples LIMIT 3"
+$ ./run.sh sample.db "SELECT name FROM apples LIMIT 3"
 Granny Smith
 Fuji
 Honeycrisp
@@ -146,7 +109,7 @@ Honeycrisp
 ### Select from multiple columns
 
 ```shell
-$ ./your_program.sh sample.db "SELECT name, color FROM apples"
+$ ./run.sh sample.db "SELECT name, color FROM apples"
 Granny Smith|Light Green
 Fuji|Red
 Honeycrisp|Blush Red
@@ -154,7 +117,7 @@ Golden Delicious|Yellow
 ```
 
 ```shell
-$ ./your_program.sh sample.db "SELECT * FROM apples"
+$ ./run.sh sample.db "SELECT * FROM apples"
 1|Granny Smith|Light Green
 2|Fuji|Red
 3|Honeycrisp|Blush Red
@@ -164,7 +127,7 @@ $ ./your_program.sh sample.db "SELECT * FROM apples"
 Additionally, `LIMIT` is supported.
 
 ```shell
-$ ./your_program.sh sample.db "SELECT id, name, color FROM apples LIMIT 10"
+$ ./run.sh sample.db "SELECT id, name, color FROM apples LIMIT 10"
 1|Granny Smith|Light Green
 2|Fuji|Red
 3|Honeycrisp|Blush Red
@@ -174,14 +137,14 @@ $ ./your_program.sh sample.db "SELECT id, name, color FROM apples LIMIT 10"
 ### Select Using Where
 
 ```shell
-$ ./your_program.sh sample.db "SELECT id, name, color FROM apples WHERE color = 'Blush Red'"
+$ ./run.sh sample.db "SELECT id, name, color FROM apples WHERE color = 'Blush Red'"
 3|Honeycrisp|Blush Red
 ```
 
 Additionally, `LIMIT` is supported.
 
 ```shell
-$ ./your_program.sh sample.db "SELECT id, name, color FROM apples WHERE color = 'Blush Red' LIMIT 1"
+$ ./run.sh sample.db "SELECT id, name, color FROM apples WHERE color = 'Blush Red' LIMIT 1"
 3|Honeycrisp|Blush Red
 ```
 
@@ -190,7 +153,7 @@ $ ./your_program.sh sample.db "SELECT id, name, color FROM apples WHERE color = 
 Large tables, spanning multiple pages, are supported.
 
 ```shell
-$ ./your_program.sh superheroes.db "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes'"
+$ ./run.sh superheroes.db "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes'"
 297|Stealth (New Earth)
 790|Tobias Whale (New Earth)
 1085|Felicity (New Earth)
@@ -214,7 +177,7 @@ The test database contains a `companies` table with an index named `idx_companie
 We can download a small version of the `companies` database to test locally.
 
 ```shell
-$ ./your_program.sh companies.db "SELECT id, name FROM companies WHERE country = 'eritrea'"
+$ ./run.sh companies.db "SELECT id, name FROM companies WHERE country = 'eritrea'"
 121311|unilink s.c.
 2102438|orange asmara it solutions
 5729848|zara mining share company
@@ -230,8 +193,8 @@ Since the table `superheroes` is smaller than `companies`, we can add an index t
 ```shell
 $ sqlite3 superheroes.db "CREATE INDEX idx_superheroes_eye_color on superheroes (eye_color)"
 
-$ ./your_program.sh superheroes.db "SELECT id, name FROM superheroes LIMIT 10"
-$ ./your_program.sh superheroes.db "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes' LIMIT 3"
+$ ./run.sh superheroes.db "SELECT id, name FROM superheroes LIMIT 10"
+$ ./run.sh superheroes.db "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes' LIMIT 3"
 ```
 
 # Additional Notes

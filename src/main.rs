@@ -1,9 +1,9 @@
 //! # SQLite Application
 
 use anyhow::{bail, Result};
-use codecrafters_sqlite::constants::SELECT_PATTERN;
-use codecrafters_sqlite::dot_cmd::{dot_dbinfo, dot_indexes, dot_tables};
-use codecrafters_sqlite::sql::select;
+use sqlite_client_rust::constants::SELECT_PATTERN;
+use sqlite_client_rust::dot_cmd::{dot_dbinfo, dot_indexes, dot_tables};
+use sqlite_client_rust::sql::select;
 use std::time::Instant;
 
 fn main() -> Result<()> {

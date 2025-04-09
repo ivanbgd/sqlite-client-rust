@@ -427,7 +427,7 @@ fn get_indexed_row_ids(
                 get_index_contents_from_serial_type(index_page, &mut offset, index_ser_type)?;
             if demanded_index_value.le(&last_index_val) {
                 for cell_ptr in cell_ptr_array {
-                    // A cell is: Number of bytes of payload and payload itself. We can ignore overflows in this challenge, and we indeed do.
+                    // A cell is: Number of bytes of payload and payload itself. We can ignore overflows in this project, and we indeed do.
                     // Payload is a record (header and body). A record contains a header and a body, in that order.
                     // Body is a key (of any supported type for a column - a serial type) and a number, which is a tuple of an index value and a row id.
                     let mut offset = cell_ptr;
@@ -485,7 +485,7 @@ fn get_indexed_row_ids(
             for cell_ptr in index_page.get_cell_ptr_array() {
                 // Let's jump to the cell. The cell pointer offsets are relative to the start of the page.
                 // Cell contains: (Page number of left child, Number of bytes of payload, Payload, ...) as (u32, varint, byte array, ...).
-                // We can ignore overflows in this challenge, and we indeed do.
+                // We can ignore overflows in this project, and we indeed do.
                 let mut offset = cell_ptr + 4; // The +4 is to skip "Page number of left child".
                 let _payload_len = get_varint(index_page, &mut offset)?;
                 let _header_len = get_varint(index_page, &mut offset)?;
@@ -564,7 +564,7 @@ fn indexed_select_columns_in_order_rec_where(
     // The format of a cell (B-tree Cell Format) depends on which kind of b-tree page the cell appears on (the current page).
     match page_type {
         PageType::TableLeaf => {
-            // A cell is: Number of bytes of payload, row ID and payload itself. We can ignore overflows in this challenge, and we indeed do.
+            // A cell is: Number of bytes of payload, row ID and payload itself. We can ignore overflows in this project, and we indeed do.
             // Payload is a record (header and body). A record contains a header and a body, in that order.
             // Body is a key (of any supported type for a column - a serial type) and a number, which is a tuple of an index value and a row id.
             let cell_ptr_array = page.get_cell_ptr_array();
